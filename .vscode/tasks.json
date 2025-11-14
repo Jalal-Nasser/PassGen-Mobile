@@ -1,0 +1,20 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Typecheck (tsc)",
+			"type": "shell",
+			"command": "npx",
+			"args": [
+				"tsc",
+				"-p",
+				"."
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		}
+	]
+}
