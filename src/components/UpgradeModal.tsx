@@ -120,10 +120,10 @@ export default function UpgradeModal({ open, onClose }: UpgradeModalProps) {
           </div>
 
           <div className="card qr-card">
-            <div className="card-title">Pay via QR</div>
+            <div className="card-title">Scan to pay on phone</div>
             <div className="qr-wrap" onClick={()=>fileInputRef.current?.click()} title="Click to upload your QR image">
               <img
-                src={qrDataUrl || '/qr.png'}
+                src={qrDataUrl || './qr.png'}
                 alt="Payment QR"
                 onError={(e:any)=>{ e.currentTarget.style.opacity = 0.4 }}
               />
@@ -135,7 +135,7 @@ export default function UpgradeModal({ open, onClose }: UpgradeModalProps) {
               fr.onload = () => { const data = String(fr.result); localStorage.setItem('passgen-qr', data); setQrDataUrl(data) }
               fr.readAsDataURL(file)
             }} />
-            <small className="hint">Click the QR to upload your code (optional)</small>
+            <small className="hint">Click to upload a different QR (optional)</small>
           </div>
         </div>
 
