@@ -71,7 +71,8 @@
       "createStartMenuShortcut": true,
       "shortcutName": "PassGen",
       "deleteAppDataOnUninstall": false,
-      "perMachine": false
+      "perMachine": false,
+      "license": "LICENSE.txt"
     },
     "mac": {
       "icon": "public/icon.png",

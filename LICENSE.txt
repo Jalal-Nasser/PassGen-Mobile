@@ -1,0 +1,70 @@
+END-USER LICENSE AGREEMENT (EULA) FOR PASSGEN
+
+IMPORTANT: PLEASE READ THIS LICENSE AGREEMENT CAREFULLY BEFORE USING THIS SOFTWARE.
+
+This End-User License Agreement ("EULA") is a legal agreement between you (either an individual or a single entity) and PassGen for the PassGen software product, which includes computer software and may include associated media, printed materials, and online or electronic documentation ("Software").
+
+By installing, copying, or otherwise using the Software, you agree to be bound by the terms of this EULA. If you do not agree to the terms of this EULA, do not install or use the Software.
+
+1. GRANT OF LICENSE
+PassGen grants you a non-exclusive, non-transferable license to use the Software for personal or commercial purposes.
+
+2. DESCRIPTION OF RIGHTS AND LIMITATIONS
+
+2.1 FREE VERSION
+- Store up to 4 passwords
+- Local storage only
+- Password generation features
+- Basic encryption (AES-256)
+
+2.2 PREMIUM VERSION ($3.99/month)
+- Unlimited password storage
+- Cloud synchronization (Google Drive, AWS S3, DigitalOcean)
+- All features from Free version
+
+2.3 You may not:
+- Reverse engineer, decompile, or disassemble the Software
+- Remove or modify any proprietary notices or labels
+- Distribute, rent, lease, or sublicense the Software
+- Use the Software for any illegal purpose
+
+3. ZERO-KNOWLEDGE ARCHITECTURE
+The Software uses a zero-knowledge encryption architecture. This means:
+- Your master password never leaves your device
+- Your stored passwords are encrypted locally before any cloud sync
+- The software developer cannot access, decrypt, or recover your passwords
+- You are solely responsible for remembering your master password
+
+4. DATA AND PRIVACY
+- The Software does not collect telemetry or analytics
+- No personal information is transmitted to our servers
+- Cloud storage (if used) stores only encrypted data
+- You retain full ownership of your data
+
+5. DISCLAIMER OF WARRANTIES
+THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, OR NON-INFRINGEMENT. THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE SOFTWARE IS WITH YOU.
+
+6. LIMITATION OF LIABILITY
+IN NO EVENT SHALL PASSGEN BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PECUNIARY LOSS) ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE.
+
+7. PASSWORD RECOVERY
+IMPORTANT: Due to the zero-knowledge encryption architecture, if you forget your master password, there is NO WAY to recover your encrypted passwords. Please store your master password securely.
+
+8. TERMINATION
+This license is effective until terminated. Your rights under this license will terminate automatically without notice if you fail to comply with any term of this EULA. Upon termination, you must destroy all copies of the Software.
+
+9. GOVERNING LAW
+This EULA shall be governed by and construed in accordance with the laws of your jurisdiction, without regard to its conflict of law provisions.
+
+10. ENTIRE AGREEMENT
+This EULA constitutes the entire agreement between you and PassGen concerning the Software and supersedes all prior or contemporaneous oral or written communications, proposals, and representations with respect to the Software.
+
+11. UPDATES AND MODIFICATIONS
+PassGen reserves the right to update or modify this EULA at any time. Continued use of the Software after any such changes constitutes your acceptance of the new terms.
+
+12. CONTACT INFORMATION
+For questions about this EULA, please contact: billing@privetserver.com
+
+By clicking "I Agree" or by installing the Software, you acknowledge that you have read this EULA, understand it, and agree to be bound by its terms and conditions.
+
+Copyright © 2025 PassGen. All rights reserved.
