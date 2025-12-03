@@ -122,7 +122,8 @@ async function checkForUpdates(silent = false) {
     const current = app.getVersion().replace(/^v/, '')
     const js = `(
       async () => {
-        const res = await fetch('https://api.github.com/repos/Jalal-Nasser/PassGen-Releases/releases/latest');
+        // Fetch latest release from the main PassGen repo
+        const res = await fetch('https://api.github.com/repos/Jalal-Nasser/PassGen/releases/latest');
         const data = await res.json();
         return { tag: (data.tag_name||'').replace(/^v/, ''), url: data.html_url||'' }
       }
