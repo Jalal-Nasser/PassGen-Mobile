@@ -95,9 +95,18 @@ function App() {
     const cfg = new ConfigStore()
     const inputHash = CryptoJS.SHA256(masterPasswordInput).toString()
     const existingHash = cfg.getMasterPasswordHash()
+    let hasVault = false
+    try {
+      const raw = localStorage.getItem('passgen-vault-data')
+      hasVault = !!raw && Array.isArray(JSON.parse(raw)) && JSON.parse(raw).length > 0
+    } catch {}
 
-    // First-time setup: persist hash
+    // First-time setup: only persist hash when no existing vault
     if (!existingHash) {
+      if (hasVault) {
+        alert('A vault already exists. Please enter your original master password or use Reset App to start fresh.')
+        return
+      }
       cfg.setMasterPasswordHash(inputHash)
     } else if (existingHash !== inputHash) {
       alert('Incorrect master password. Please try again.')
