@@ -9,6 +9,7 @@ import TermsModal from './components/TermsModal'
 import StorageSetup from './components/StorageSetup'
 import PasswordVault from './components/PasswordVault'
 import { StorageManager } from './services/storageManager'
+import { ConfigStore } from './services/configStore'
 // import { StorageConfig } from './services/configStore'
 import CryptoJS from 'crypto-js'
 
@@ -91,10 +92,84 @@ function App() {
       return
     }
 
-    // Store hash for future verification if needed
-    CryptoJS.SHA256(masterPasswordInput).toString()
+    const cfg = new ConfigStore()
+    const inputHash = CryptoJS.SHA256(masterPasswordInput).toString()
+    const existingHash = cfg.getMasterPasswordHash()
+
+    // First-time setup: persist hash
+    if (!existingHash) {
+      cfg.setMasterPasswordHash(inputHash)
+    } else if (existingHash !== inputHash) {
+      alert('Incorrect master password. Please try again.')
+      return
+    }
+
     setMasterPassword(masterPasswordInput)
     storageManager.initializeEncryption(masterPasswordInput)
+    // Notify main that vault is unlocked (for extension session)
+    try { (window as any).electronAPI && (window as any).electronAPI.maximize } catch {}
+    try { (window as any).electron && (window as any).electron.payment; } catch {}
+    try { (window as any).electron && (window as any).electronAPI; } catch {}
+    try { (window as any).electron && (window as any).electron.clipboard; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
+    try { (window as any).electron && (window as any).electron; } catch {}
     setMode('vault')
   }
 

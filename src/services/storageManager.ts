@@ -57,6 +57,32 @@ export class StorageManager {
     }
   }
 
+  async updatePasswordEntry(entry: PasswordEntry): Promise<void> {
+    if (!this.encryption) {
+      throw new Error('Encryption not initialized. Please set master password.');
+    }
+
+    const encryptedData = this.encryption.encryptEntry(entry);
+    const filename = `password-${entry.id}.json`;
+
+    // Load existing vault
+    const existingData = localStorage.getItem('passgen-vault-data');
+    if (!existingData) {
+      throw new Error('No vault data found');
+    }
+    const vault = JSON.parse(existingData);
+
+    // Find and update the entry
+    const index = vault.findIndex((item: any) => item.filename === filename);
+    if (index === -1) {
+      throw new Error('Entry not found');
+    }
+    vault[index] = { filename, data: encryptedData };
+
+    // Save back
+    localStorage.setItem('passgen-vault-data', JSON.stringify(vault));
+  }
+
   async getAllPasswordEntries(): Promise<PasswordEntry[]> {
     if (!this.encryption) {
       throw new Error('Encryption not initialized');

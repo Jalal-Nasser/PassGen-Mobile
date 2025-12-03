@@ -53,6 +53,12 @@ Get the latest Windows installer from the public downloads repo:
 
 https://github.com/Jalal-Nasser/PassGen-Releases/releases
 
+## Browser Extension (Beta)
+- Folder: `extension/`
+- Load as unpacked in Chrome/Edge (enable Developer Mode), then paste the session token from the Vault footer into the extension options.
+- After pairing, the extension detects login forms and autofills the first matching credential by domain.
+- Security: The desktop app serves a loopback-only bridge on `127.0.0.1:17865` and requires a session token; secrets are returned only on explicit fill.
+
 ## Getting Started
 
 ### Quick Start (New Users)
@@ -116,6 +122,10 @@ npm run electron:build
 ```
 
 The built application will be available in the `release` folder.
+
+## Updates
+- Automatic: The app periodically checks GitHub Releases and shows a notification when a newer version is available.
+- Manual: Use Help → Check for Updates to run a check immediately.
 
 ## Usage
 

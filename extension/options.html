@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>PassGen Autofill</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 16px; }
+    label { display:block; margin-bottom:8px; }
+    input { width: 100%; }
+    button { margin-top: 8px; }
+    .status { margin-top: 12px; opacity: 0.8; }
+  </style>
+</head>
+<body>
+  <h1>PassGen Autofill</h1>
+  <p>Paste the session token from the desktop app (generated after unlocking the vault).</p>
+  <label>
+    Session Token
+    <input id="token" type="text" placeholder="Paste token here" />
+  </label>
+  <button id="save">Save</button>
+  <div class="status" id="status"></div>
+  <script>
+    const tokenEl = document.getElementById('token');
+    const statusEl = document.getElementById('status');
+    chrome.storage.local.get(['token'], (d) => { if (d.token) tokenEl.value = d.token; });
+    document.getElementById('save').addEventListener('click', () => {
+      const token = tokenEl.value.trim();
+      chrome.storage.local.set({ token }, () => {
+        chrome.runtime.sendMessage({ type: 'passgen:setToken', token }, (resp) => {
+          statusEl.textContent = resp && resp.ok ? 'Saved.' : 'Failed to save token';
+        });
+      });
+    });
+  </script>
+</body>
+</html>

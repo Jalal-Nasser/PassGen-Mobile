@@ -13,6 +13,8 @@ interface PasswordVaultProps {
 function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
   const [entries, setEntries] = useState<PasswordEntry[]>([])
   const [showAddForm, setShowAddForm] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editingEntry, setEditingEntry] = useState<PasswordEntry | null>(null)
   const [newEntry, setNewEntry] = useState({
     name: '',
     username: '',
@@ -22,10 +24,30 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
   })
   const [loading, setLoading] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
+  const [sessionToken, setSessionToken] = useState<string>('')
   const store = new ConfigStore()
 
   useEffect(() => {
     loadEntries()
+    // Expose helpers for main process bridge
+    ;(window as any).__passgen_listEntries = async () => {
+      try { return await storageManager.getAllPasswordEntries() } catch { return [] }
+    }
+    ;(window as any).__passgen_getEntryById = async (id: string) => {
+      try {
+        const all = await storageManager.getAllPasswordEntries()
+        const e = all.find(x => x.id === id)
+        if (!e) return null
+        return { username: e.username, password: e.password }
+      } catch { return null }
+    }
+    // Fetch session token for extension pairing
+    ;(async () => {
+      try {
+        const token = await (window as any).electronAPI?.getSessionToken?.()
+        if (typeof token === 'string') setSessionToken(token)
+      } catch {}
+    })()
   }, [])
 
   const loadEntries = async () => {
@@ -83,30 +105,51 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
       return
     }
 
-    if (!store.isPremium() && entries.length >= 4) {
-      // Free limit reached
+    if (!isEditing && !store.isPremium() && entries.length >= 4) {
+      // Free limit reached (only for new entries)
       window.dispatchEvent(new Event('open-upgrade'))
       return
     }
 
     try {
       setLoading(true)
-      const entry: PasswordEntry = {
-        id: Date.now().toString(),
-        name: newEntry.name,
-        password: newEntry.password,
-        username: newEntry.username,
-        url: newEntry.url,
-        notes: newEntry.notes,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+      if (isEditing && editingEntry) {
+        // Update existing entry
+        const updatedEntry: PasswordEntry = {
+          ...editingEntry,
+          name: newEntry.name,
+          password: newEntry.password,
+          username: newEntry.username,
+          url: newEntry.url,
+          notes: newEntry.notes,
+          updatedAt: new Date().toISOString(),
+        }
+
+        await storageManager.updatePasswordEntry(updatedEntry)
+        alert('Password updated successfully!')
+      } else {
+        // Save new entry
+        const entry: PasswordEntry = {
+          id: Date.now().toString(),
+          name: newEntry.name,
+          password: newEntry.password,
+          username: newEntry.username,
+          url: newEntry.url,
+          notes: newEntry.notes,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }
+
+        await storageManager.savePasswordEntry(entry)
+        alert('Password saved successfully!')
       }
 
-      await storageManager.savePasswordEntry(entry)
-      setEntries([...entries, entry])
+      // Reset form and reload entries
       setNewEntry({ name: '', username: '', password: '', url: '', notes: '' })
       setShowAddForm(false)
-      alert('Password saved successfully!')
+      setIsEditing(false)
+      setEditingEntry(null)
+      await loadEntries()
     } catch (error) {
       console.error('Failed to save entry:', error)
       alert('Failed to save password: ' + (error as Error).message)
@@ -125,6 +168,19 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
     }
   }
 
+  const handleEditEntry = (entry: PasswordEntry) => {
+    setIsEditing(true)
+    setEditingEntry(entry)
+    setNewEntry({
+      name: entry.name,
+      username: entry.username || '',
+      password: entry.password,
+      url: entry.url || '',
+      notes: entry.notes || '',
+    })
+    setShowAddForm(true)
+  }
+
   const filteredEntries = entries.filter(entry =>
     entry.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     entry.username?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -139,7 +195,15 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
           <button onClick={onGenerateNew} className="action-btn">
             Generate New
           </button>
-          <button onClick={() => setShowAddForm(!showAddForm)} className="action-btn">
+          <button onClick={() => {
+            setShowAddForm(!showAddForm)
+            if (showAddForm) {
+              // Canceling
+              setIsEditing(false)
+              setEditingEntry(null)
+              setNewEntry({ name: '', username: '', password: '', url: '', notes: '' })
+            }
+          }} className="action-btn">
             {showAddForm ? 'Cancel' : '+ Add Password'}
           </button>
           <button onClick={loadEntries} className="action-btn" disabled={loading}>
@@ -173,7 +237,7 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
 
       {showAddForm && (
         <div className="add-form">
-          <h3>Add New Password</h3>
+          <h3>{isEditing ? 'Edit Password' : 'Add New Password'}</h3>
           <div className="form-grid">
             <div className="form-group">
               <label>Name *</label>
@@ -227,7 +291,7 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
             </div>
           </div>
           <button onClick={handleSaveEntry} className="save-btn" disabled={loading}>
-            {loading ? 'Saving...' : 'Save Password'}
+            {loading ? 'Saving...' : (isEditing ? 'Update Password' : 'Save Password')}
           </button>
         </div>
       )}
@@ -252,6 +316,9 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
                     🔗 Open
                   </a>
                 )}
+                <button onClick={() => handleEditEntry(entry)} className="edit-btn">
+                  ✏️ Edit
+                </button>
               </div>
             </div>
             
@@ -294,6 +361,10 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
       <div className="vault-footer">
         <p>
           Storage: <strong>{storageManager.getCurrentProvider()}</strong>
+        </p>
+        <p className="encryption-notice" style={{display:'flex', alignItems:'center', gap:8}}>
+          🔑 Session Token: <input type="text" readOnly value={sessionToken} style={{flex:1}} />
+          <button className="copy-small-btn" onClick={async ()=>{ const ok = await copyText(sessionToken); if (!ok) alert('Failed to copy token'); }}>Copy</button>
         </p>
         <p className="encryption-notice">
           🔒 All passwords are encrypted with your master password

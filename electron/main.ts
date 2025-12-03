@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, shell, Menu, dialog, clipboard } from 'electron'
+import * as http from 'http'
 // Load environment variables from .env if present (development convenience)
 try {
   // Dynamically require without adding type dep; ignore if not installed
@@ -9,6 +10,8 @@ try {
 import * as path from 'path'
 
 let mainWindow: BrowserWindow | null = null;
+let sessionToken: string | null = null;
+let server: http.Server | null = null;
 
 function resolveIconPath() {
   try {
@@ -73,7 +76,7 @@ function setApplicationMenu() {
                   const data = await res.json();
                   const latest = data.tag_name?.replace(/^v/, '');
                   const url = data.html_url;
-                  const current = '1.0.3';
+                  const current = '1.0.4';
                   if (latest && latest !== current) {
                     if (confirm('New version ' + latest + ' available! Go to download page?')) {
                       window.open(url, '_blank');
@@ -116,6 +119,37 @@ function setApplicationMenu() {
   ]
   const menu = Menu.buildFromTemplate(template)
   Menu.setApplicationMenu(menu)
+}
+
+async function checkForUpdates(silent = false) {
+  try {
+    const current = app.getVersion().replace(/^v/, '')
+    const js = `(
+      async () => {
+        const res = await fetch('https://api.github.com/repos/Jalal-Nasser/PassGen-Releases/releases/latest');
+        const data = await res.json();
+        return { tag: (data.tag_name||'').replace(/^v/, ''), url: data.html_url||'' }
+      }
+    )()`
+    const { tag, url } = await (mainWindow?.webContents.executeJavaScript(js).catch(()=>({tag:'',url:''})) || Promise.resolve({tag:'',url:''}))
+    if (tag && tag !== current) {
+      dialog.showMessageBox({
+        type: 'info',
+        title: 'Update Available',
+        message: `A new version ${tag} is available`,
+        detail: 'Click Download to open the releases page.',
+        buttons: ['Download', 'Later'],
+        defaultId: 0,
+        cancelId: 1
+      }).then(({ response }) => {
+        if (response === 0 && url) shell.openExternal(url)
+      })
+    } else if (!silent) {
+      dialog.showMessageBox({ type: 'info', title: 'PassGen', message: 'You have the latest version.' })
+    }
+  } catch (e) {
+    if (!silent) dialog.showMessageBox({ type: 'warning', title: 'Update Check Failed', message: String((e as Error).message||e) })
+  }
 }
 
 function createWindow() {
@@ -192,6 +226,10 @@ if (!gotTheLock) {
   app.whenReady().then(() => {
     createWindow()
     setApplicationMenu()
+    // Initial update check and periodic checks every 6 hours
+    setTimeout(() => checkForUpdates(true), 5000)
+    setInterval(() => checkForUpdates(true), 6 * 60 * 60 * 1000)
+    startBridgeServer()
 
     app.on('activate', function () {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -200,6 +238,7 @@ if (!gotTheLock) {
 }
 
 app.on('window-all-closed', () => {
+  stopBridgeServer()
   app.quit();
 })
 
@@ -261,3 +300,129 @@ ipcMain.handle('clipboard:readText', async () => {
     return ''
   }
 })
+
+// Expose current session token to renderer (read-only)
+ipcMain.handle('bridge:getToken', async () => {
+  return sessionToken || ''
+})
+
+// Session token management for extension bridge
+function generateSessionToken(): string {
+  const buf = Buffer.alloc(16)
+  for (let i = 0; i < buf.length; i++) buf[i] = Math.floor(Math.random() * 256)
+  return buf.toString('hex')
+}
+
+ipcMain.on('vault:unlocked', () => {
+  sessionToken = generateSessionToken()
+})
+
+ipcMain.on('vault:locked', () => {
+  sessionToken = null
+})
+
+function startBridgeServer() {
+  try {
+    if (server) return
+    server = http.createServer(async (req, res) => {
+      try {
+        const url = new URL(req.url || '/', 'http://127.0.0.1')
+        const origin = req.headers['origin'] as string | undefined
+        const allow = !origin || origin.startsWith('chrome-extension://') || origin.startsWith('edge-extension://')
+        if (!allow) {
+          res.writeHead(403)
+          res.end('Forbidden')
+          return
+        }
+
+        if (url.pathname === '/health') {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: true }))
+          return
+        }
+
+        if (url.pathname === '/credentials') {
+          const token = (req.headers['x-passgen-session'] as string) || url.searchParams.get('token') || ''
+          if (!sessionToken || token !== sessionToken) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'locked' }))
+            return
+          }
+          const domain = url.searchParams.get('domain') || ''
+          const names = await getCandidateNames(domain)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ domain, names }))
+          return
+        }
+
+        if (url.pathname === '/fill') {
+          const token = (req.headers['x-passgen-session'] as string) || url.searchParams.get('token') || ''
+          if (!sessionToken || token !== sessionToken) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'locked' }))
+            return
+          }
+          let body = ''
+          req.on('data', (chunk) => body += chunk)
+          req.on('end', async () => {
+            try {
+              const payload = JSON.parse(body || '{}')
+              const { id } = payload
+              const creds = await getCredentialsById(id)
+              if (!creds) {
+                res.writeHead(404, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ error: 'not_found' }))
+                return
+              }
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ username: creds.username || '', password: creds.password }))
+            } catch (e: any) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ error: 'bad_request', detail: e?.message || String(e) }))
+            }
+          })
+          return
+        }
+
+        res.writeHead(404)
+        res.end('Not Found')
+      } catch {
+        res.writeHead(500)
+        res.end('Server Error')
+      }
+    })
+    server.listen(17865, '127.0.0.1')
+  } catch (e) {
+    console.error('Bridge server failed to start:', e)
+  }
+}
+
+function stopBridgeServer() {
+  try { server?.close() } catch {}
+  server = null
+}
+
+async function getCandidateNames(domain: string): Promise<Array<{ id: string; name: string }>> {
+  try {
+    const web = mainWindow?.webContents
+    if (!web) return []
+    const list = await web.executeJavaScript('window.__passgen_listEntries?.()').catch(() => [])
+    const arr = Array.isArray(list) ? list : []
+    const m = domain?.toLowerCase() || ''
+    return arr.filter((e: any) => (e?.url || '').toLowerCase().includes(m) || (e?.name || '').toLowerCase().includes(m)).map((e: any) => ({ id: e.id, name: e.name }))
+  } catch {
+    return []
+  }
+}
+
+async function getCredentialsById(id: string): Promise<{ username?: string; password: string } | null> {
+  try {
+    const web = mainWindow?.webContents
+    if (!web) return null
+    const entry = await web.executeJavaScript('window.__passgen_getEntryById?.(' + JSON.stringify(id) + ')').catch(() => null)
+    if (!entry) return null
+    return entry as { username?: string; password: string }
+  } catch {
+    return null
+  }
+}

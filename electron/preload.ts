@@ -36,7 +36,10 @@ contextBridge.exposeInMainWorld('electron', {
 contextBridge.exposeInMainWorld('electronAPI', {
   minimize: () => ipcRenderer.send('window:minimize'),
   maximize: () => ipcRenderer.send('window:maximize'),
-  close: () => ipcRenderer.send('window:close')
+  close: () => ipcRenderer.send('window:close'),
+  vaultUnlocked: () => ipcRenderer.send('vault:unlocked'),
+  vaultLocked: () => ipcRenderer.send('vault:locked'),
+  getSessionToken: () => ipcRenderer.invoke('bridge:getToken')
 })
 
 declare global {
@@ -54,6 +57,9 @@ declare global {
       minimize: () => void
       maximize: () => void
       close: () => void
+      vaultUnlocked: () => void
+      vaultLocked: () => void
+      getSessionToken: () => Promise<string>
     }
   }
 }
