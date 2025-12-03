@@ -156,6 +156,10 @@ The built application will be available in the `release` folder.
 2. Complete PayPal payment ($3.99/month)
 3. Request activation code via email
 4. Enter activation code to unlock premium features
+<img width="873" height="657" alt="image" src="https://github.com/user-attachments/assets/3f0e7972-32b4-48b3-a38b-d364a69a9029" />
+<img width="759" height="531" alt="image" src="https://github.com/user-attachments/assets/13d12a58-a763-4918-b6d5-fba9552e0036" />
+<img width="562" height="498" alt="image" src="https://github.com/user-attachments/assets/50e8092f-b006-4918-80f4-c1582666d8de" />
+
 
 ## Project Structure
 
