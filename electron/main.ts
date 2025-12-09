@@ -258,43 +258,8 @@ function createWindow() {
     mainWindow.loadURL(devServerUrl)
     // Don't open dev tools automatically
   } else {
-    // Production: serve from local HTTP server for secure context (WebAuthn support)
-    const distPath = path.join(__dirname, '../dist')
-    // Start simple HTTP server on localhost for secure context
-    if (!server) {
-      server = http.createServer((req, res) => {
-        let filePath = path.join(distPath, req.url === '/' ? 'index.html' : req.url)
-        // Prevent directory traversal
-        if (!filePath.startsWith(distPath)) {
-          res.writeHead(403)
-          res.end('Forbidden')
-          return
-        }
-        // Try the file, fall back to index.html for SPA
-        require('fs').readFile(filePath, (err: any, content: any) => {
-          if (err) {
-            require('fs').readFile(path.join(distPath, 'index.html'), (err2: any, content2: any) => {
-              res.writeHead(200, { 'Content-Type': 'text/html' })
-              res.end(content2 || 'Not found')
-            })
-          } else {
-            const ext = path.extname(filePath).toLowerCase()
-            const mimeTypes: {[key: string]: string} = {
-              '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css',
-              '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml',
-              '.ico': 'image/x-icon', '.woff': 'font/woff', '.woff2': 'font/woff2'
-            }
-            res.writeHead(200, { 'Content-Type': mimeTypes[ext] || 'application/octet-stream' })
-            res.end(content)
-          }
-        })
-      })
-      server.listen(47823, 'localhost', () => {
-        mainWindow?.loadURL('http://localhost:47823')
-      })
-    } else {
-      mainWindow.loadURL('http://localhost:47823')
-    }
+    // Production: load from dist folder
+    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
 
   mainWindow.on('closed', () => {
