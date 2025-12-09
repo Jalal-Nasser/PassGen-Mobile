@@ -379,7 +379,9 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
                 <button onClick={repairVault} disabled={loading}>Repair Vault</button>
               )}
               <button onClick={() => window.dispatchEvent(new Event('open-storage-setup'))}>Change Storage</button>
-              <button onClick={handleSetupPasskey} disabled={loading}>Setup Passkey</button>
+              {((import.meta as any)?.env?.DEV === true) && (
+                <button onClick={handleSetupPasskey} disabled={loading}>Setup Passkey</button>
+              )}
               {store.isPremium() && (
                 <>
                   <button onClick={handleExport} disabled={loading}>Export Vault Backup</button>
