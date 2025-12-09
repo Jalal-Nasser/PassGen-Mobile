@@ -13,6 +13,9 @@ let mainWindow: BrowserWindow | null = null;
 let sessionToken: string | null = null;
 let appServer: http.Server | null = null;  // HTTP server for serving the app (production only)
 let bridgeServer: http.Server | null = null;  // HTTP server for extension bridge (all modes)
+const APP_SERVER_PORT_BASE = 27649;
+let appServerPort = APP_SERVER_PORT_BASE;
+const APP_SERVER_MAX_RETRIES = 5;
 
 function resolveIconPath() {
   try {
@@ -261,7 +264,7 @@ function createWindow() {
   } else {
     // Production: use local HTTP server to enable WebAuthn (secure context)
     // appServer should be started in app.whenReady() before creating window
-    mainWindow.loadURL('http://127.0.0.1:27649')
+    mainWindow.loadURL(`http://127.0.0.1:${appServerPort}`)
   }
 
   mainWindow.on('closed', () => {
@@ -278,7 +281,7 @@ function createWindow() {
 
   // Add loading indicator
   mainWindow.webContents.on('did-finish-load', () => {
-    console.log('[WINDOW] App finished loading at http://127.0.0.1:27649')
+    console.log(`[WINDOW] App finished loading at http://127.0.0.1:${appServerPort}`)
     // Check if localStorage is accessible
     mainWindow?.webContents.executeJavaScript(`
       (function() {
@@ -569,89 +572,106 @@ function startAppServer(): Promise<void> {
         fs.mkdirSync(storageDir, { recursive: true })
         console.log('[APP SERVER] Created storage directory:', storageDir)
       }
-    
-    appServer = http.createServer((req, res) => {
-      console.log('[APP SERVER] Request:', req.method, req.url)
-      try {
-        // Parse URL
-        let urlPath = req.url || '/'
-        if (urlPath.startsWith('?')) urlPath = '/'
-        // Default to index.html for root
-        let filePath = urlPath === '/' ? path.join(distPath, 'index.html') : path.join(distPath, urlPath)
-        // Security: prevent directory traversal
-        const realPath = require('path').resolve(filePath)
-        if (!realPath.startsWith(require('path').resolve(distPath))) {
-          res.writeHead(403, { 'Content-Type': 'text/plain' })
-          res.end('403 Forbidden')
-          return
-        }
-        // Try to serve the file
-        fs.stat(filePath, (err, stats) => {
-          if (err || !stats.isFile()) {
-            // File not found, serve index.html for SPA routing
-            fs.readFile(path.join(distPath, 'index.html'), (err, content) => {
-              if (!err) {
-                res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-                res.end(content)
-              } else {
-                console.error('[APP SERVER] Failed to serve index.html:', err)
-                res.writeHead(404, { 'Content-Type': 'text/plain' })
-                res.end('404 Not Found')
+
+      const createHandler = () => {
+        return http.createServer((req, res) => {
+          console.log('[APP SERVER] Request:', req.method, req.url)
+          try {
+            // Parse URL
+            let urlPath = req.url || '/'
+            if (urlPath.startsWith('?')) urlPath = '/'
+            // Default to index.html for root
+            let filePath = urlPath === '/' ? path.join(distPath, 'index.html') : path.join(distPath, urlPath)
+            // Security: prevent directory traversal
+            const realPath = require('path').resolve(filePath)
+            if (!realPath.startsWith(require('path').resolve(distPath))) {
+              res.writeHead(403, { 'Content-Type': 'text/plain' })
+              res.end('403 Forbidden')
+              return
+            }
+            // Try to serve the file
+            fs.stat(filePath, (err, stats) => {
+              if (err || !stats.isFile()) {
+                // File not found, serve index.html for SPA routing
+                fs.readFile(path.join(distPath, 'index.html'), (err, content) => {
+                  if (!err) {
+                    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+                    res.end(content)
+                  } else {
+                    console.error('[APP SERVER] Failed to serve index.html:', err)
+                    res.writeHead(404, { 'Content-Type': 'text/plain' })
+                    res.end('404 Not Found')
+                  }
+                })
+                return
               }
+              // File exists, serve it with appropriate MIME type
+              const ext = path.extname(filePath).toLowerCase()
+              const mimeTypes = {
+                '.html': 'text/html; charset=utf-8',
+                '.js': 'application/javascript; charset=utf-8',
+                '.css': 'text/css; charset=utf-8',
+                '.json': 'application/json',
+                '.png': 'image/png',
+                '.jpg': 'image/jpeg',
+                '.gif': 'image/gif',
+                '.svg': 'image/svg+xml',
+                '.ico': 'image/x-icon',
+                '.woff': 'font/woff',
+                '.woff2': 'font/woff2',
+                '.ttf': 'font/ttf'
+              }
+              const contentType = mimeTypes[ext] || 'application/octet-stream'
+              res.writeHead(200, { 'Content-Type': contentType })
+              const stream = fs.createReadStream(filePath)
+              stream.on('error', (e) => {
+                console.error('[APP SERVER] Error streaming file', filePath, e)
+                res.writeHead(500, { 'Content-Type': 'text/plain' })
+                res.end('500 Internal Server Error')
+              })
+              stream.pipe(res)
             })
-            return
-          }
-          // File exists, serve it with appropriate MIME type
-          const ext = path.extname(filePath).toLowerCase()
-          const mimeTypes = {
-            '.html': 'text/html; charset=utf-8',
-            '.js': 'application/javascript; charset=utf-8',
-            '.css': 'text/css; charset=utf-8',
-            '.json': 'application/json',
-            '.png': 'image/png',
-            '.jpg': 'image/jpeg',
-            '.gif': 'image/gif',
-            '.svg': 'image/svg+xml',
-            '.ico': 'image/x-icon',
-            '.woff': 'font/woff',
-            '.woff2': 'font/woff2',
-            '.ttf': 'font/ttf'
-          }
-          const contentType = mimeTypes[ext] || 'application/octet-stream'
-          res.writeHead(200, { 'Content-Type': contentType })
-          const stream = fs.createReadStream(filePath)
-          stream.on('error', (e) => {
-            console.error('[APP SERVER] Error streaming file', filePath, e)
+          } catch (e) {
+            console.error('[APP SERVER] Unexpected error:', e)
             res.writeHead(500, { 'Content-Type': 'text/plain' })
             res.end('500 Internal Server Error')
-          })
-          stream.pipe(res)
+          }
         })
-      } catch (e) {
-        console.error('[APP SERVER] Unexpected error:', e)
-        res.writeHead(500, { 'Content-Type': 'text/plain' })
-        res.end('500 Internal Server Error')
       }
-    })
-    
-    appServer.listen(27649, '127.0.0.1', () => {
-      console.log('[APP SERVER] Listening on http://127.0.0.1:27649')
-      console.log('[APP SERVER] userData path:', app.getPath('userData'))
-      console.log('[APP SERVER] Partition storage dir:', storageDir)
-      console.log('[APP SERVER] Storage exists:', fs.existsSync(storageDir))
-      console.log('[APP SERVER] distPath:', distPath)
-      console.log('[APP SERVER] index.html exists:', fs.existsSync(path.join(distPath, 'index.html')))
-      resolve()
-    })
-    
-    appServer.on('error', (err) => {
-      console.error('[APP SERVER] Server error:', err)
-      reject(err)
-    })
-  } catch (e) {
-    console.error('[APP SERVER] Failed to start:', e)
-    reject(e)
-  }
+
+      const tryListen = (attempt: number) => {
+        if (attempt > APP_SERVER_MAX_RETRIES) {
+          reject(new Error('Failed to bind HTTP server after retries'))
+          return
+        }
+        appServer = createHandler()
+        appServer.once('error', (err: any) => {
+          console.error('[APP SERVER] Server error:', err)
+          if (err.code === 'EADDRINUSE') {
+            appServerPort += 1
+            console.log(`[APP SERVER] Port in use, retrying on ${appServerPort} (attempt ${attempt + 1}/${APP_SERVER_MAX_RETRIES})`)
+            tryListen(attempt + 1)
+          } else {
+            reject(err)
+          }
+        })
+
+        appServer.listen(appServerPort, '127.0.0.1', () => {
+          console.log(`[APP SERVER] Listening on http://127.0.0.1:${appServerPort}`)
+          console.log('[APP SERVER] userData path:', app.getPath('userData'))
+          console.log('[APP SERVER] Partition storage dir:', storageDir)
+          console.log('[APP SERVER] Storage exists:', fs.existsSync(storageDir))
+          console.log('[APP SERVER] distPath:', distPath)
+          console.log('[APP SERVER] index.html exists:', fs.existsSync(path.join(distPath, 'index.html')))
+          resolve()
+        })
+      }
+
+      tryListen(1)
+    } catch (e) {
+      console.error('[APP SERVER] Failed to start:', e)
+      reject(e)
+    }
   })
 }
 
