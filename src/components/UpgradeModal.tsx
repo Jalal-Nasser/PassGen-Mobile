@@ -207,26 +207,14 @@ export default function UpgradeModal({ open, onClose }: UpgradeModalProps) {
             </div>
             <div className="email-capture">
               <label>{t('Payment Method')}</label>
-              <div className="payment-method-selector">
-                <label className={`method-option ${paymentMethod === 'paypal' ? 'active' : ''}`}>
-                  <input
-                    type="radio"
-                    value="paypal"
-                    checked={paymentMethod === 'paypal'}
-                    onChange={(e) => setPaymentMethod(e.target.value as 'paypal')}
-                  />
-                  <span>PayPal</span>
-                </label>
-                <label className={`method-option ${paymentMethod === 'crypto' ? 'active' : ''}`}>
-                  <input
-                    type="radio"
-                    value="crypto"
-                    checked={paymentMethod === 'crypto'}
-                    onChange={(e) => setPaymentMethod(e.target.value as 'crypto')}
-                  />
-                  <span>{t('Crypto (USDT)')}</span>
-                </label>
-              </div>
+              <select
+                className="payment-method-select"
+                value={paymentMethod}
+                onChange={(e) => setPaymentMethod(e.target.value as 'paypal' | 'crypto')}
+              >
+                <option value="paypal">PayPal</option>
+                <option value="crypto">{t('Crypto (USDT)')}</option>
+              </select>
             </div>
             <div className="email-capture">
               <label>{t('Your Email (for activation)')}</label>
