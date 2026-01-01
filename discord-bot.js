@@ -183,8 +183,7 @@ async function handleActivateCommand(interaction) {
       .update({
         status: 'activated',
         activation_code: activationCode,
-        activated_at: new Date().toISOString(),
-        activated_by: interaction.user.username
+        activated_at: new Date().toISOString()
       })
       .eq('id', request.id)
 
