@@ -428,54 +428,20 @@ app.on('window-all-closed', () => {
   app.quit();
 })
 
-// Handle payment activation email request
+// Handle payment activation request
 ipcMain.handle('payment:requestActivation', async (_event, payload: { email: string; requestId: string; paymentMethod?: 'paypal' | 'crypto' }) => {
-  const adminEmail = 'activation@mdeploy.dev'
-  const resendApiKey = process.env.RESEND_API_KEY || ''
-
-  const subject = `PassGen Premium Activation Request – ${payload.requestId}`
-  const htmlBody = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #333;">PassGen Premium Activation Request</h2>
-      <p>A user has requested activation after payment:</p>
-      <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
-        <tr style="background: #f5f5f5;">
-          <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Install/Request ID:</td>
-          <td style="padding: 10px; border: 1px solid #ddd;">${payload.requestId}</td>
-        </tr>
-        <tr>
-          <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">User Email:</td>
-          <td style="padding: 10px; border: 1px solid #ddd;">${payload.email || '(not provided)'}</td>
-        </tr>
-        <tr style="background: #f5f5f5;">
-          <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Payment Method:</td>
-          <td style="padding: 10px; border: 1px solid #ddd;">${payload.paymentMethod || 'paypal'}</td>
-        </tr>
-        <tr>
-          <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Plan:</td>
-          <td style="padding: 10px; border: 1px solid #ddd;">Premium $15 / 6 months</td>
-        </tr>
-        <tr style="background: #f5f5f5;">
-          <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Time:</td>
-          <td style="padding: 10px; border: 1px solid #ddd;">${new Date().toISOString()}</td>
-        </tr>
-      </table>
-      <p style="color: #666;">Please verify payment on PayPal or crypto wallet and send activation code to the user.</p>
-      <p style="color: #666;"><a href="https://mdeploy.dev/dashboard">View in Dashboard</a></p>
-    </div>
-  `
-  const textBody = `PassGen Premium Activation Request\n\nInstall/Request ID: ${payload.requestId}\nUser Email: ${payload.email || '(not provided)'}\nPayment Method: ${payload.paymentMethod || 'paypal'}\nPlan: Premium $15 / 6 months\nTime: ${new Date().toISOString()}\n\nPlease verify payment and send activation code.\nView in Dashboard: https://mdeploy.dev/dashboard`
-
   try {
-    // Save to Supabase Edge Function (which will save to Supabase and send Discord notification)
-    try {
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ylzxeyqlqvziwnradcmy.supabase.co'
+    const defaultSupabaseUrl = 'https://ylzxeyqlqvziwnradcmy.supabase.co'
+    const defaultSupabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlsenhleXFscXZ6aXducmFkY215Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU0NjIzMTAsImV4cCI6MjA4MTAzODMxMH0.e-0bhGJnlEC_hJ-DUiICu9KoZ0753bSp4QaIuamNG7o'
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || defaultSupabaseUrl
+    const supabaseKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || defaultSupabaseKey
 
+    try {
       const response = await fetch(`${supabaseUrl}/functions/v1/activation-request`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlsenhleXFscXZ6aXducmFkY215Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU0NjIzMTAsImV4cCI6MjA4MTAzODMxMH0.e-0bhGJnlEC_hJ-DUiICu9KoZ0753bSp4QaIuamNG7o'}`
+          'Authorization': `Bearer ${supabaseKey}`
         },
         body: JSON.stringify({
           install_id: payload.requestId,
@@ -490,15 +456,13 @@ ipcMain.handle('payment:requestActivation', async (_event, payload: { email: str
       }
 
       console.log('[PAYMENT] Activation request saved via Edge Function')
+      return { success: true }
     } catch (apiError) {
       console.error('[PAYMENT] Edge Function error:', apiError)
       // Fallback to direct Supabase insertion if Edge Function fails
       try {
         const { createClient } = await import('@supabase/supabase-js')
-        const supabase = createClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ylzxeyqlqvziwnradcmy.supabase.co',
-          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlsenhleXFscXZ6aXducmFkY215Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU0NjIzMTAsImV4cCI6MjA4MTAzODMxMH0.e-0bhGJnlEC_hJ-DUiICu9KoZ0753bSp4QaIuamNG7o'
-        )
+        const supabase = createClient(supabaseUrl, supabaseKey)
 
         const { error } = await supabase
           .from('activation_requests')
@@ -512,32 +476,18 @@ ipcMain.handle('payment:requestActivation', async (_event, payload: { email: str
           })
 
         if (error) {
-          console.error('[PAYMENT] Fallback Supabase save failed:', error)
+          throw error
         }
+
+        console.log('[PAYMENT] Activation request saved via Supabase client fallback')
+        return { success: true }
       } catch (fallbackError) {
         console.error('[PAYMENT] Fallback save error:', fallbackError)
+        return { success: false, error: 'Failed to send activation request. Please try again later.' }
       }
     }
-
-    // Send email
-    if (!resendApiKey) {
-      return { success: false, error: 'Email service is not configured. Please contact support.' }
-    }
-    const { Resend } = await import('resend')
-    const resend = new Resend(resendApiKey)
-
-    await resend.emails.send({
-      from: 'PassGen <activation@mdeploy.dev>',
-      to: [adminEmail],
-      subject: subject,
-      html: htmlBody,
-      text: textBody,
-      reply_to: payload.email || undefined
-    })
-
-    return { success: true }
   } catch (err) {
-    console.error('[PAYMENT] Failed to send activation request via Resend:', err)
+    console.error('[PAYMENT] Activation request failed:', err)
     return { success: false, error: 'Failed to send activation request. Please try again later.' }
   }
 })

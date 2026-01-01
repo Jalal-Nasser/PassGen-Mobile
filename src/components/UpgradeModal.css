@@ -439,6 +439,39 @@
   font-size: 14px;
 }
 
+.activation-card .method-option {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  color: #0f172a;
+}
+
+.activation-card .method-option:hover {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+}
+
+.activation-card .method-option.active {
+  background: #e0e7ff;
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.12);
+  color: #0f172a;
+}
+
+.activation-card .method-option::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid #94a3b8;
+  background: #fff;
+  display: inline-block;
+}
+
+.activation-card .method-option.active::before {
+  border-color: #4f46e5;
+  background: #4f46e5;
+}
+
 .hint { color:#888; display:block; margin-top:8px; text-align:center; }
 
 @media (max-width: 720px){
