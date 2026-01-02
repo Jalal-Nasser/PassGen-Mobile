@@ -11,6 +11,7 @@
     "electron:build": "tsc && vite build && node scripts/sync-icons.js && electron-builder",
     "test:vault": "tsc && electron . --vault-self-test",
     "test:oauth": "tsc && electron . --oauth-ipc-test",
+    "test:auth": "tsc && electron . --auth-test",
     "gen:activation": "node scripts/generate-activation.js",
     "dashboard": "node dashboard-server.js",
     "discord-bot": "node discord-bot.js"
@@ -40,6 +41,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.925.0",
+    "@auth/core": "^0.34.3",
     "@peculiar/x509": "^1.14.2",
     "@supabase/supabase-js": "^2.89.0",
     "axios": "^1.13.2",
@@ -55,6 +57,9 @@
     "react-dom": "^18.2.0",
     "resend": "^3.5.0",
     "tweetnacl": "^1.0.3"
+  },
+  "optionalDependencies": {
+    "keytar": "^7.9.0"
   },
   "build": {
     "appId": "com.passgen.app",

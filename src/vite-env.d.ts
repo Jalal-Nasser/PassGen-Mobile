@@ -13,4 +13,12 @@ declare interface Window {
 		payment: PaymentAPI
 		clipboard: ClipboardAPI
 	}
+	electronAPI?: {
+		authLogin: (deviceId: string) => Promise<{ ok: boolean }>
+		authGetSession: () => Promise<{ email?: string; userId?: string; plan?: string; isPremium?: boolean; expiresAt?: string | null } | null>
+		authGetMe: () => Promise<{ userId: string; email: string; plan: string; isPremium: boolean; expiresAt: string | null }>
+		authLogout: () => Promise<{ ok: boolean }>
+		licenseGetMe: () => Promise<{ email: string; plan: string; isPremium: boolean }>
+		onAuthUpdated: (handler: (session: any) => void) => () => void
+	}
 }

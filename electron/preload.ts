@@ -61,7 +61,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   storageS3SignedRequest: (config: any, key: string) => ipcRenderer.invoke('storage:s3SignedRequest', config, key),
   oauthGoogleDrive: () => ipcRenderer.invoke('oauth:google'),
   storageGoogleDriveConnect: () => ipcRenderer.invoke('storage:googleDriveConnect'),
-  storageGoogleDriveDisconnect: () => ipcRenderer.invoke('storage:googleDriveDisconnect')
+  storageGoogleDriveDisconnect: () => ipcRenderer.invoke('storage:googleDriveDisconnect'),
+  authLogin: (deviceId: string) => ipcRenderer.invoke('auth:login', deviceId),
+  authGetSession: () => ipcRenderer.invoke('auth:getSession'),
+  authGetMe: () => ipcRenderer.invoke('auth:getMe'),
+  authLogout: () => ipcRenderer.invoke('auth:logout'),
+  licenseGetMe: () => ipcRenderer.invoke('license:getMe'),
+  onAuthUpdated: (handler: (session: any) => void) => {
+    const listener = (_event: any, session: any) => handler(session)
+    ipcRenderer.on('auth:updated', listener)
+    return () => ipcRenderer.removeListener('auth:updated', listener)
+  }
 })
 
 declare global {
@@ -99,6 +109,12 @@ declare global {
       oauthGoogleDrive: () => Promise<{ email: string; provider: 'google-drive'; token: any }>
       storageGoogleDriveConnect: () => Promise<{ email: string; provider: 'google-drive'; token: any }>
       storageGoogleDriveDisconnect: () => Promise<void>
+      authLogin: (deviceId: string) => Promise<{ ok: boolean }>
+      authGetSession: () => Promise<{ email?: string; userId?: string; plan?: string; isPremium?: boolean; expiresAt?: string | null } | null>
+      authGetMe: () => Promise<{ userId: string; email: string; plan: string; isPremium: boolean; expiresAt: string | null }>
+      authLogout: () => Promise<{ ok: boolean }>
+      licenseGetMe: () => Promise<{ email: string; plan: string; isPremium: boolean }>
+      onAuthUpdated: (handler: (session: any) => void) => () => void
     }
   }
 }

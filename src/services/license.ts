@@ -35,3 +35,21 @@ export function isProviderAllowed(provider: ProviderId, tier: PremiumTier): bool
 export function getEntryLimit(tier: PremiumTier): number | null {
   return tier === 'free' ? 4 : null
 }
+
+export function applyRemoteLicense(payload: { isPremium: boolean; plan?: string; expiresAt?: string | null } | null): void {
+  const store = new ConfigStore()
+  if (payload?.isPremium) {
+    const expiresAt = payload.expiresAt ? new Date(payload.expiresAt) : undefined
+    store.setPremium(true, expiresAt)
+    const plan = String(payload.plan || '').toLowerCase()
+    const allowed = ['free', 'pro', 'cloud', 'byos']
+    localStorage.setItem('passgen-premium-tier', allowed.includes(plan) ? plan : 'cloud')
+  } else {
+    store.setPremium(false)
+    localStorage.setItem('passgen-premium-tier', 'free')
+  }
+  const api = (window as any)?.electronAPI
+  if (api?.emit) {
+    api.emit('premium:changed')
+  }
+}

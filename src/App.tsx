@@ -11,7 +11,7 @@ import PasswordVault from './components/PasswordVault'
 import { CustomTitleBar } from './components/CustomTitleBar'
 import { StorageManager } from './services/storageManager'
 import { ConfigStore } from './services/configStore'
-import { getPremiumTier } from './services/license'
+import { applyRemoteLicense, getPremiumTier } from './services/license'
 import { useI18n } from './services/i18n'
 import SettingsModal from './components/SettingsModal'
 
@@ -73,6 +73,32 @@ function App() {
     const handlePremiumChange = () => setPremiumTier(getPremiumTier())
     window.addEventListener('premium-changed', handlePremiumChange)
     return () => window.removeEventListener('premium-changed', handlePremiumChange)
+  }, [])
+
+  useEffect(() => {
+    const api = (window as any).electronAPI
+    if (!api?.licenseGetMe) return
+    let cancelled = false
+
+    const syncLicense = async () => {
+      try {
+        const me = await api.licenseGetMe()
+        if (!cancelled) applyRemoteLicense(me)
+      } catch (error) {
+        console.warn('License sync failed:', (error as Error).message)
+      }
+    }
+
+    syncLicense()
+
+    const unsubscribe = api.onAuthUpdated?.(() => {
+      syncLicense()
+    })
+
+    return () => {
+      cancelled = true
+      if (typeof unsubscribe === 'function') unsubscribe()
+    }
   }, [])
 
   // Check if user has completed onboarding before

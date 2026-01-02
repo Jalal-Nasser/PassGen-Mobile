@@ -6,19 +6,32 @@ import * as path from 'path'
 try {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const dotenv = require('dotenv')
-  const candidates = [
-    path.join(process.cwd(), '.env'),
-    path.join(process.cwd(), 'resources', '.env'),
+  const packagedCandidates = [
     path.join(process.resourcesPath || '', '.env'),
     path.join(process.resourcesPath || '', 'app.asar.unpacked', '.env')
   ]
+  const devCandidates = [
+    path.join(process.cwd(), 'resources', '.env'),
+    path.join(process.cwd(), '.env')
+  ]
+  const candidates = app.isPackaged ? packagedCandidates : devCandidates
   let loaded = false
-  for (const candidate of candidates) {
-    if (candidate && fs.existsSync(candidate)) {
-      dotenv.config({ path: candidate, override: true })
-      console.log(`[ENV] Loaded .env from ${candidate}`)
-      loaded = true
-      break
+  if (app.isPackaged) {
+    for (const candidate of candidates) {
+      if (candidate && fs.existsSync(candidate)) {
+        dotenv.config({ path: candidate, override: true })
+        console.log(`[ENV] Loaded .env from ${candidate}`)
+        loaded = true
+        break
+      }
+    }
+  } else {
+    for (const candidate of candidates) {
+      if (candidate && fs.existsSync(candidate)) {
+        dotenv.config({ path: candidate, override: true })
+        console.log(`[ENV] Loaded .env from ${candidate}`)
+        loaded = true
+      }
     }
   }
   if (!loaded) {
@@ -29,6 +42,8 @@ try {
 }
 import { VaultRepository } from './vault/vaultRepository'
 import { runVaultSelfTests } from './vault/selfTest'
+import { loadDesktopSession, saveDesktopSession, clearDesktopSession } from './auth/desktopSessionStore'
+import type { AppAccountSession } from './vault/types'
 
 let mainWindow: BrowserWindow | null = null;
 let sessionToken: string | null = null;
@@ -54,6 +69,8 @@ const KEYBOARD_SHORTCUTS_DETAIL =
   'Ctrl+C - Copy password\nCtrl+L - Lock vault\nCtrl+N - New password entry\nCtrl+F - Search vault\nCtrl+Q - Quit application\nF5 - Refresh\nF11 - Toggle fullscreen'
 const ABOUT_DETAIL =
   'A secure password generator and vault.\n\nDeveloper: JalalNasser\nLicense: MIT\n\nFeatures:\n• Generate secure passwords\n• Encrypt and store passwords\n• Cloud sync (Premium)\n• Browser extension support\n\nPremium: $15 / 6 months for cloud sync and unlimited items.'
+
+const AUTH_PROTOCOL = 'passgen'
 
 function openDocumentation() {
   shell.openExternal(HELP_DOCS_URL)
@@ -88,6 +105,130 @@ function showAboutDialog() {
     if (response === 2) shell.openExternal(HELP_DOCS_URL)
     if (response === 3) shell.openExternal(HELP_ISSUES_URL)
   })
+}
+
+function getVercelBaseUrl(): string {
+  const raw = process.env.VERCEL_APP_URL || ''
+  if (!raw) {
+    throw new Error('VERCEL_APP_URL is not configured')
+  }
+  return raw.replace(/\/+$/, '')
+}
+
+function buildDesktopLoginUrl(deviceId: string): string {
+  const base = getVercelBaseUrl()
+  return `${base}/desktop/login?device=${encodeURIComponent(deviceId)}`
+}
+
+function findProtocolUrl(argv: string[]): string | null {
+  return argv.find((arg) => arg.startsWith(`${AUTH_PROTOCOL}://`)) || null
+}
+
+function sanitizeSession(session: AppAccountSession | null) {
+  if (!session) return null
+  return {
+    email: session.email,
+    userId: session.userId,
+    plan: session.plan,
+    isPremium: session.isPremium,
+    expiresAt: session.expiresAt
+  }
+}
+
+async function notifyAuthUpdated(session: AppAccountSession | null) {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.webContents.send('auth:updated', sanitizeSession(session))
+}
+
+async function refreshDesktopSession(session: AppAccountSession): Promise<AppAccountSession> {
+  if (!session.refreshToken || !session.deviceId) {
+    throw new Error('Missing refresh token for desktop session')
+  }
+  const response = await fetch(`${getVercelBaseUrl()}/api/desktop/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken: session.refreshToken, deviceId: session.deviceId })
+  })
+
+  if (!response.ok) {
+    throw new Error(`Refresh failed (${response.status})`)
+  }
+
+  const data = await response.json()
+  const updated: AppAccountSession = {
+    ...session,
+    accessToken: data.accessToken,
+    accessExpiresAt: data.accessExpiresAt,
+    refreshToken: data.refreshToken || session.refreshToken,
+    refreshExpiresAt: data.refreshExpiresAt || session.refreshExpiresAt
+  }
+  await saveDesktopSession(updated, vaultRepository)
+  return updated
+}
+
+async function handleAuthCallbackUrl(rawUrl: string): Promise<void> {
+  try {
+    const url = new URL(rawUrl)
+    if (url.protocol !== `${AUTH_PROTOCOL}:`) return
+    if (url.hostname !== 'auth-callback') return
+
+    const accessToken = url.searchParams.get('token') || ''
+    if (!accessToken) return
+
+    const session: AppAccountSession = {
+      accessToken,
+      accessExpiresAt: url.searchParams.get('expires') || undefined,
+      refreshToken: url.searchParams.get('refresh') || undefined,
+      refreshExpiresAt: url.searchParams.get('refreshExpires') || undefined,
+      deviceId: url.searchParams.get('device') || undefined
+    }
+
+    await saveDesktopSession(session, vaultRepository)
+    await notifyAuthUpdated(session)
+    if (process.argv.includes('--auth-test')) {
+      console.log('[AUTH TEST] Session stored for desktop login')
+    }
+  } catch (error) {
+    console.error('[AUTH] Failed to handle callback:', (error as Error).message)
+  }
+}
+
+async function fetchAuthMe(): Promise<{ userId: string; email: string; plan: string; isPremium: boolean; expiresAt: string | null }> {
+  const session = await loadDesktopSession(vaultRepository)
+  if (!session?.accessToken) {
+    throw new Error('No active app session')
+  }
+  let response = await fetch(`${getVercelBaseUrl()}/api/me`, {
+    headers: {
+      Authorization: `Bearer ${session.accessToken}`
+    }
+  })
+
+  if (response.status === 401 && session.refreshToken) {
+    const refreshed = await refreshDesktopSession(session)
+    response = await fetch(`${getVercelBaseUrl()}/api/me`, {
+      headers: {
+        Authorization: `Bearer ${refreshed.accessToken}`
+      }
+    })
+  }
+
+  if (!response.ok) {
+    throw new Error(`Auth request failed (${response.status})`)
+  }
+
+  const data = await response.json()
+  const updated: AppAccountSession = {
+    ...session,
+    email: data.email,
+    userId: data.userId,
+    plan: data.plan,
+    isPremium: data.isPremium,
+    expiresAt: data.expiresAt || null
+  }
+  await saveDesktopSession(updated, vaultRepository)
+  await notifyAuthUpdated(updated)
+  return data
 }
 
 function setApplicationMenu() {
@@ -408,10 +549,26 @@ const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
+  if (app.isPackaged) {
+    app.setAsDefaultProtocolClient(AUTH_PROTOCOL)
+  } else {
+    const appPath = path.resolve(process.argv[1] || '')
+    app.setAsDefaultProtocolClient(AUTH_PROTOCOL, process.execPath, appPath ? [appPath] : [])
+  }
+
+  app.on('open-url', (event, url) => {
+    event.preventDefault()
+    handleAuthCallbackUrl(url)
+  })
+
+  app.on('second-instance', (_event, argv) => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
+    }
+    const protocolUrl = findProtocolUrl(argv || [])
+    if (protocolUrl) {
+      handleAuthCallbackUrl(protocolUrl)
     }
   });
 
@@ -436,6 +593,11 @@ if (!gotTheLock) {
     setInterval(() => checkForUpdates(true), 6 * 60 * 60 * 1000)
     startBridgeServer()
 
+    const initialProtocolUrl = findProtocolUrl(process.argv || [])
+    if (initialProtocolUrl) {
+      handleAuthCallbackUrl(initialProtocolUrl)
+    }
+
     if (process.argv.includes('--oauth-ipc-test')) {
       mainWindow?.webContents.once('did-finish-load', async () => {
         try {
@@ -446,6 +608,18 @@ if (!gotTheLock) {
           console.error('[OAUTH TEST] Failed:', (error as Error).message)
         } finally {
           setTimeout(() => app.quit(), 1500)
+        }
+      })
+    }
+
+    if (process.argv.includes('--auth-test')) {
+      mainWindow?.webContents.once('did-finish-load', async () => {
+        try {
+          const deviceId = await mainWindow?.webContents.executeJavaScript('localStorage.getItem("passgen-install-id") || "passgen-dev-device"')
+          console.log('[AUTH TEST] Opening login for device:', deviceId)
+          await shell.openExternal(buildDesktopLoginUrl(String(deviceId)))
+        } catch (error) {
+          console.error('[AUTH TEST] Failed to start login:', (error as Error).message)
         }
       })
     }
@@ -583,6 +757,77 @@ ipcMain.handle('vault:importLegacy', async (_event, entries: Array<{ filename: s
 
 ipcMain.handle('vault:repair', async () => {
   return vaultRepository.repairVault()
+})
+
+ipcMain.handle('auth:login', async (_event, deviceId: string) => {
+  if (!deviceId) {
+    throw new Error('Missing device id')
+  }
+  const loginUrl = buildDesktopLoginUrl(deviceId)
+  await shell.openExternal(loginUrl)
+  return { ok: true }
+})
+
+ipcMain.handle('auth:getSession', async () => {
+  const session = await loadDesktopSession(vaultRepository)
+  return sanitizeSession(session)
+})
+
+ipcMain.handle('auth:getMe', async () => {
+  return fetchAuthMe()
+})
+
+ipcMain.handle('auth:logout', async () => {
+  await clearDesktopSession(vaultRepository)
+  await notifyAuthUpdated(null)
+  return { ok: true }
+})
+
+ipcMain.handle('license:getMe', async () => {
+  const baseUrl = (() => {
+    try {
+      return getVercelBaseUrl()
+    } catch (error) {
+      console.warn('[LICENSE DEBUG] Missing VERCEL_APP_URL:', (error as Error).message)
+      return ''
+    }
+  })()
+  const requestUrl = baseUrl ? `${baseUrl}/api/me` : ''
+  console.log('[LICENSE DEBUG] VERCEL_APP_URL=', baseUrl || 'MISSING')
+  console.log('[LICENSE DEBUG] requestUrl=', requestUrl || 'MISSING')
+
+  const session = await loadDesktopSession(vaultRepository)
+  if (!session?.accessToken) {
+    console.log('[LICENSE DEBUG] No desktop session access token')
+    throw new Error('Not authenticated / invalid desktop token')
+  }
+
+  let response: Response | null = null
+  let responseText = ''
+  try {
+    response = await fetch(requestUrl, {
+      headers: {
+        Authorization: `Bearer ${session.accessToken}`
+      }
+    })
+    responseText = await response.text()
+  } catch (error) {
+    console.log('[LICENSE DEBUG] request failed:', (error as Error).message)
+    throw error
+  }
+
+  console.log('[LICENSE DEBUG] status=', response.status)
+  console.log('[LICENSE DEBUG] body=', responseText.slice(0, 200))
+
+  if (response.status === 401 || response.status === 403) {
+    throw new Error('Not authenticated / invalid desktop token')
+  }
+  if (!response.ok) {
+    throw new Error(`License request failed (${response.status})`)
+  }
+
+  const data = JSON.parse(responseText || '{}')
+  return { email: data.email, plan: data.plan, isPremium: data.isPremium }
 })
 
 ipcMain.handle('storage:configure', async (_event, config) => {

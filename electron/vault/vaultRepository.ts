@@ -11,7 +11,8 @@ import type {
   VaultFile,
   VaultFileHeader,
   GoogleDriveProviderConfig,
-  S3CompatibleProviderConfig
+  S3CompatibleProviderConfig,
+  AppAccountSession
 } from './types'
 import {
   createNewVaultFile,
@@ -49,6 +50,7 @@ export class VaultRepository {
   private derivedKey: Buffer | null = null
   private pendingConfig: StorageConfigInput | null = null
   private pendingGoogleDrive: GoogleDriveProviderConfig | null = null
+  private pendingAppAccount: AppAccountSession | null = null
   private syncedFromCloud = false
 
   getStatus(): { hasVault: boolean; vaultPath: string; activeProviderId: ProviderId } {
@@ -104,6 +106,29 @@ export class VaultRepository {
     }
   }
 
+  getAppAccountSession(): AppAccountSession | null {
+    if (this.vaultPayload?.appAccount) return this.vaultPayload.appAccount
+    if (this.pendingAppAccount) return this.pendingAppAccount
+    return null
+  }
+
+  async setAppAccountSession(session: AppAccountSession | null): Promise<void> {
+    if (this.vaultPayload) {
+      this.vaultPayload.appAccount = session || undefined
+      await this.persistVault()
+    } else {
+      this.pendingAppAccount = session
+    }
+  }
+
+  async clearAppAccountSession(): Promise<void> {
+    if (this.vaultPayload) {
+      this.vaultPayload.appAccount = undefined
+      await this.persistVault()
+    }
+    this.pendingAppAccount = null
+  }
+
   async unlock(masterPassword: string): Promise<{ isNew: boolean }> {
     const vaultPath = this.getVaultPath()
     const existed = fs.existsSync(vaultPath)
@@ -136,6 +161,12 @@ export class VaultRepository {
       this.setGoogleDriveConfig(this.pendingGoogleDrive)
       await this.persistVault()
       this.pendingGoogleDrive = null
+    }
+
+    if (this.pendingAppAccount) {
+      this.vaultPayload.appAccount = this.pendingAppAccount
+      await this.persistVault()
+      this.pendingAppAccount = null
     }
 
     return { isNew: !existed }
@@ -234,6 +265,8 @@ export class VaultRepository {
       throw new Error('Google Drive OAuth credentials are not configured')
     }
 
+    const oauthClientId = process.env.PASSGEN_GOOGLE_CLIENT_ID ?? process.env.GOOGLE_CLIENT_ID ?? ''
+    console.log('[OAuth] Using client_id =', oauthClientId.slice(0, 12), '...', oauthClientId.slice(-12))
     const { oauth2Client, code } = await this.startGoogleOAuth(oauthBase)
     const { tokens } = await oauth2Client.getToken(code)
     oauth2Client.setCredentials(tokens)
@@ -455,6 +488,29 @@ export class VaultRepository {
       prompt: 'consent'
     })
 
+    const clientIdSource = process.env.PASSGEN_GOOGLE_CLIENT_ID
+      ? 'PASSGEN_GOOGLE_CLIENT_ID'
+      : 'GOOGLE_CLIENT_ID'
+    const rawClientId = process.env.PASSGEN_GOOGLE_CLIENT_ID ?? process.env.GOOGLE_CLIENT_ID ?? ''
+    const safeAuthUrl = (() => {
+      try {
+        const url = new URL(authUrl)
+        const redactKeys = new Set(['client_secret', 'access_token', 'refresh_token', 'id_token', 'code', 'token'])
+        for (const key of redactKeys) {
+          if (url.searchParams.has(key)) {
+            url.searchParams.set(key, 'REDACTED')
+          }
+        }
+        return url.toString()
+      } catch {
+        return authUrl
+      }
+    })()
+    console.log('[OAuth] client_id source =', clientIdSource)
+    console.log('[OAuth] client_id =', rawClientId.slice(0, 12), '...', rawClientId.slice(-12))
+    console.log('[OAuth] redirect_uri =', redirectUri)
+    console.log('[OAuth] auth_url =', safeAuthUrl)
+
     const codePromise = new Promise<string>((resolve, reject) => {
       const timeout = setTimeout(() => {
         server.close()
@@ -483,6 +539,8 @@ export class VaultRepository {
       })
     })
 
+    console.log(`[OAuth] authUrl=${authUrl}`)
+    console.log(`[OAuth] clientIdSource=${clientIdSource} clientIdLen=${rawClientId.length} redirectUri=${redirectUri}`)
     await shell.openExternal(authUrl)
     const code = await codePromise
     return { oauth2Client, code }

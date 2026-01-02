@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ConfigStore } from '../services/configStore'
+import { applyRemoteLicense } from '../services/license'
 import { copyText } from '../services/clipboard'
 import './UpgradeModal.css'
 import { useI18n } from '../services/i18n'
@@ -56,17 +57,28 @@ export default function UpgradeModal({ open, onClose }: UpgradeModalProps) {
   const [code, setCode] = useState('')
   const [testResult, setTestResult] = useState<string>('')
   const [devSecret, setDevSecret] = useState<string>(showTestVerify ? store.getSellerSecretForDebug() : '')
-  const activateWithCode = () => {
+  const activateWithCode = async () => {
     if (!code) { alert(t('Enter activation code')); return }
     if (!userEmail) { alert(t('Enter your email first')); return }
-    if (store.verifyActivationCode(code, userEmail)) {
-      store.setPremium(true)
-      // Notify main process to update menu
-      ;(window as any).electronAPI?.emit?.('premium:changed')
-      onClose()
-      alert(t('Premium activated. Enjoy!'))
-    } else {
+    if (!store.verifyActivationCode(code, userEmail)) {
       alert(t('Invalid activation code.'))
+      return
+    }
+    try {
+      const api = (window as any).electronAPI
+      if (!api?.licenseGetMe) {
+        throw new Error('License backend is not available')
+      }
+      const me = await api.licenseGetMe()
+      applyRemoteLicense(me)
+      if (me?.isPremium) {
+        onClose()
+        alert(t('Premium activated. Enjoy!'))
+      } else {
+        alert(t('Activation request sent. You will be activated after verification.'))
+      }
+    } catch (e:any) {
+      alert(t('Activation request sent. You will be activated after verification.'))
     }
   }
 

@@ -46,9 +46,23 @@ export interface ProviderConfigs {
   onedrive?: Record<string, never>
 }
 
+export interface AppAccountSession {
+  accessToken?: string
+  accessExpiresAt?: string
+  refreshToken?: string
+  refreshExpiresAt?: string
+  deviceId?: string
+  email?: string
+  userId?: string
+  plan?: string
+  isPremium?: boolean
+  expiresAt?: string | null
+}
+
 export interface VaultPayload {
   vaultItems: VaultEntry[]
   providerConfigs: ProviderConfigs
+  appAccount?: AppAccountSession
   meta: VaultMeta
 }
 
