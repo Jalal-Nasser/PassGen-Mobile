@@ -78,6 +78,12 @@ async function upsertUser(email) {
 
 async function toRequest(req) {
   const url = new URL(req.url || '/', getBaseUrl(req))
+  if (url.pathname === '/api/auth' && url.searchParams.has('path')) {
+    const rawPath = url.searchParams.get('path') || ''
+    const normalized = rawPath.split('/').filter(Boolean).join('/')
+    url.searchParams.delete('path')
+    url.pathname = `/api/auth/${normalized}`
+  }
   const body = await readBody(req)
   return new Request(url, {
     method: req.method,
