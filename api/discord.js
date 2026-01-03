@@ -19,6 +19,8 @@ const RAW_REPLY_TO_EMAIL = process.env.REPLY_TO_EMAIL || 'activation@mdeploy.dev
 const DEFAULT_FROM_EMAIL = 'PassGen <activation@mdeploy.dev>'
 const FROM_EMAIL = normalizeFromAddress(RAW_FROM_EMAIL) || DEFAULT_FROM_EMAIL
 const REPLY_TO_EMAIL = isValidEmail(RAW_REPLY_TO_EMAIL) ? RAW_REPLY_TO_EMAIL : undefined
+const PREMIUM_PLAN = String(process.env.PASSGEN_PREMIUM_PLAN || 'cloud').toLowerCase()
+const PREMIUM_DAYS = Number(process.env.PASSGEN_PREMIUM_DAYS || 180)
 
 const supabase = SUPABASE_URL && SUPABASE_KEY ? createClient(SUPABASE_URL, SUPABASE_KEY) : null
 const encoder = new TextEncoder()
@@ -181,6 +183,8 @@ async function handleActivateButton(payload) {
 
 async function activateRequest(request) {
   const activationCode = generateActivationCode(request.install_id, request.user_email)
+  const user = await upsertUser(request.user_email)
+  await upsertSubscription(user.id, request)
   const { error } = await supabase
     .from('activation_requests')
     .update({
@@ -195,6 +199,88 @@ async function activateRequest(request) {
   }
 
   return activationCode
+}
+
+async function upsertUser(email) {
+  const normalized = String(email || '').trim().toLowerCase()
+  const { data: existing, error: lookupError } = await supabase
+    .from('users')
+    .select('*')
+    .eq('email', normalized)
+    .maybeSingle()
+
+  if (lookupError) {
+    throw new Error(`User lookup failed: ${lookupError.message}`)
+  }
+
+  if (existing) return existing
+
+  const { data, error } = await supabase
+    .from('users')
+    .insert({ email: normalized })
+    .select()
+    .single()
+
+  if (error) {
+    throw new Error(`User create failed: ${error.message}`)
+  }
+
+  return data
+}
+
+async function upsertSubscription(userId, request) {
+  const plan = normalizePlan(PREMIUM_PLAN || request?.plan)
+  const { data: existing, error: lookupError } = await supabase
+    .from('subscriptions')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('status', 'active')
+    .order('expires_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (lookupError) {
+    throw new Error(`Subscription lookup failed: ${lookupError.message}`)
+  }
+
+  const expiresAt = computeExpiry(existing?.expires_at)
+
+  if (existing) {
+    const { error } = await supabase
+      .from('subscriptions')
+      .update({ plan, status: 'active', expires_at: expiresAt })
+      .eq('id', existing.id)
+
+    if (error) {
+      throw new Error(`Subscription update failed: ${error.message}`)
+    }
+    return
+  }
+
+  const { error } = await supabase
+    .from('subscriptions')
+    .insert({ user_id: userId, plan, status: 'active', expires_at: expiresAt })
+
+  if (error) {
+    throw new Error(`Subscription create failed: ${error.message}`)
+  }
+}
+
+function computeExpiry(currentExpiresAt) {
+  if (!Number.isFinite(PREMIUM_DAYS) || PREMIUM_DAYS <= 0) {
+    return null
+  }
+  const now = new Date()
+  const existing = currentExpiresAt ? new Date(currentExpiresAt) : null
+  const base = existing && !isNaN(existing.getTime()) && existing.getTime() > now.getTime() ? existing : now
+  const expiry = new Date(base.getTime() + PREMIUM_DAYS * 24 * 60 * 60 * 1000)
+  return expiry.toISOString()
+}
+
+function normalizePlan(value) {
+  const plan = String(value || '').toLowerCase()
+  if (plan === 'byos' || plan === 'cloud' || plan === 'pro') return plan
+  return 'cloud'
 }
 
 async function disableActivationButton(payload) {
