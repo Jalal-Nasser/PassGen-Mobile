@@ -413,6 +413,52 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
 
           {step === 'select' && (
             <>
+              <div className="step-card premium-entry">
+                <div className="premium-options">
+                  <div className="premium-option">
+                    <div className="premium-title">{t('Already Premium?')}</div>
+                    <div className="premium-sub">{t('Sign in with Google to unlock cloud storage.')}</div>
+                    <div className="premium-action-row">
+                      {appAccount?.email ? (
+                        <>
+                          <span className={`status-pill ${appAccount?.isPremium ? 'premium' : 'free'}`}>
+                            {appAccount?.isPremium ? t('Premium active') : t('Free plan')}
+                          </span>
+                          <button type="button" className="secondary-btn" onClick={handleAuthLogout} disabled={authBusy}>
+                            {t('Sign out')}
+                          </button>
+                        </>
+                      ) : (
+                        <button type="button" className="secondary-btn premium-google-btn" onClick={handleAuthLogin} disabled={authBusy}>
+                          <img src="https://www.gstatic.com/images/branding/product/1x/googlelogo_light_color_92x30dp.png" alt="Google" />
+                          {authBusy ? t('Connecting...') : t('Continue with Google')}
+                        </button>
+                      )}
+                    </div>
+                    {appAccount?.email && (
+                      <div className="status-row">
+                        <span className={`status-pill ${appAccount?.isPremium ? 'premium' : 'free'}`}>
+                          {appAccount?.isPremium ? t('Premium active') : t('Free plan')}
+                        </span>
+                        <span className="status-text">
+                          {t('Signed in as {{email}}', { email: appAccount.email })}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="premium-option">
+                    <div className="premium-title">{t('Become Premium')}</div>
+                    <div className="premium-sub">{t('Request activation after payment to unlock Premium.')}</div>
+                    <div className="premium-action-row">
+                      <button type="button" className="secondary-btn" onClick={() => window.dispatchEvent(new Event('open-upgrade'))}>
+                        {t('Request Activation')}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                {authError && <p className="help-text error-text">{authError}</p>}
+                {licenseError && <p className="help-text error-text">{licenseError}</p>}
+              </div>
               {import.meta.env.DEV && (
                 <div className="help-text subtle">
                   {`signedIn=${!!appAccount?.email} `}
