@@ -50,6 +50,33 @@
   flex-shrink: 0;
 }
 
+.footer-payments {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.footer-payment-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 8px 14px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 86px;
+  height: 44px;
+}
+
+.footer-payment-card img {
+  height: 22px;
+  max-width: 96px;
+  object-fit: contain;
+}
+
 .app-footer a {
   color: #fff;
   text-decoration: none;
@@ -57,6 +84,19 @@
 
 .app-footer a:hover {
   text-decoration: underline;
+}
+
+@media (max-width: 640px) {
+  .footer-payment-card {
+    padding: 6px 10px;
+    min-width: 72px;
+    height: 38px;
+  }
+
+  .footer-payment-card img {
+    height: 18px;
+    max-width: 84px;
+  }
 }
 
 

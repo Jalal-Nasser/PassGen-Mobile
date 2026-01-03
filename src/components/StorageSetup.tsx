@@ -421,9 +421,6 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
                     <div className="premium-action-row">
                       {appAccount?.email ? (
                         <>
-                          <span className={`status-pill ${appAccount?.isPremium ? 'premium' : 'free'}`}>
-                            {appAccount?.isPremium ? t('Premium active') : t('Free plan')}
-                          </span>
                           <button type="button" className="secondary-btn" onClick={handleAuthLogout} disabled={authBusy}>
                             {t('Sign out')}
                           </button>

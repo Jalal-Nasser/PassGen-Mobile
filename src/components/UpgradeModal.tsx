@@ -273,17 +273,17 @@ export default function UpgradeModal({ open, onClose }: UpgradeModalProps) {
                 <div className="brand">
                   <img
                     src="https://www.paypalobjects.com/paypal-ui/logos/svg/paypal-wordmark-color.svg"
-                    alt="PayPal"
+                    alt={t('Credit Card')}
                     className="brand-logo"
                   />
-                  <span className="brand-sub">{t('Scan with your PayPal app')}</span>
+                  <span className="brand-sub">{t('Scan to pay')}</span>
                 </div>
                 <span className="pill outline">{t('Instant')}</span>
               </div>
               <div className="qr-wrap elevated">
                 <img
                   src={PAYPAL_QR_PATH}
-                  alt="PayPal QR"
+                  alt={t('Credit Card')}
                   onError={(e:any)=>{ e.currentTarget.style.opacity = 0.4 }}
                 />
               </div>
@@ -339,7 +339,7 @@ export default function UpgradeModal({ open, onClose }: UpgradeModalProps) {
                 value={paymentMethod}
                 onChange={(e) => setPaymentMethod(e.target.value as 'paypal' | 'crypto')}
               >
-                <option value="paypal">PayPal</option>
+                <option value="paypal">{t('Credit Card')}</option>
                 <option value="crypto">{t('Crypto (USDT)')}</option>
               </select>
             </div>

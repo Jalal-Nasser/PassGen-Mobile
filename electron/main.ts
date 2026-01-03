@@ -64,6 +64,8 @@ function resolveIconPath() {
 
 const HELP_DOCS_URL = 'https://github.com/Jalal-Nasser/PassGen-Releases'
 const HELP_ISSUES_URL = 'https://github.com/Jalal-Nasser/PassGen-Releases/issues'
+const HELP_RELEASES_URL = 'https://github.com/Jalal-Nasser/PassGen/releases'
+const HELP_WEBSITE_URL = 'https://mdeploy.dev'
 const HELP_TERMS_URL = 'https://github.com/Jalal-Nasser/PassGen-Releases/blob/main/LICENSE.txt'
 const KEYBOARD_SHORTCUTS_DETAIL =
   'Ctrl+C - Copy password\nCtrl+L - Lock vault\nCtrl+N - New password entry\nCtrl+F - Search vault\nCtrl+Q - Quit application\nF5 - Refresh\nF11 - Toggle fullscreen'
@@ -78,6 +80,10 @@ function openDocumentation() {
 
 function openTerms() {
   shell.openExternal(HELP_TERMS_URL)
+}
+
+function openReleases() {
+  shell.openExternal(HELP_RELEASES_URL)
 }
 
 function showKeyboardShortcuts() {
@@ -101,7 +107,7 @@ function showAboutDialog() {
     defaultId: 0,
     cancelId: 0
   }).then(({ response }) => {
-    if (response === 1) shell.openExternal(HELP_DOCS_URL)
+    if (response === 1) shell.openExternal(HELP_WEBSITE_URL)
     if (response === 2) shell.openExternal(HELP_DOCS_URL)
     if (response === 3) shell.openExternal(HELP_ISSUES_URL)
   })
@@ -296,6 +302,10 @@ function setApplicationMenu() {
               click: () => { checkForUpdates(false) }
             },
             {
+              label: 'GitHub Releases',
+              click: openReleases
+            },
+            {
               label: 'About PassGen',
               click: showAboutDialog
             },
@@ -376,6 +386,10 @@ function buildDefaultMenu() {
         {
           label: 'Check for Updates',
           click: () => { checkForUpdates(false) }
+        },
+        {
+          label: 'GitHub Releases',
+          click: openReleases
         },
         {
           label: 'About PassGen',
@@ -537,6 +551,14 @@ ipcMain.on('help:documentation', () => {
 
 ipcMain.on('help:shortcuts', () => {
   showKeyboardShortcuts()
+})
+
+ipcMain.on('help:check-updates', () => {
+  checkForUpdates(false)
+})
+
+ipcMain.on('help:releases', () => {
+  openReleases()
 })
 
 ipcMain.on('help:about', () => {

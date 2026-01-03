@@ -4,7 +4,7 @@ import { ConfigStore } from '../services/configStore'
 import { useI18n } from '../services/i18n'
 
 function AppFooter() {
-  const year = new Date().getFullYear()
+  const year = 2026
   const [checking, setChecking] = useState(false)
   const [updateMsg, setUpdateMsg] = useState<string|null>(null)
   const [isPremium, setIsPremium] = useState(false)
@@ -56,11 +56,37 @@ function AppFooter() {
 
   return (
     <footer className="app-footer">
+      <div className="footer-payments" aria-label="Supported payment methods">
+        <div className="footer-payment-card">
+          <img
+            src="https://upload.wikimedia.org/wikipedia/commons/2/2a/Mastercard-logo.svg"
+            alt="Mastercard"
+          />
+        </div>
+        <div className="footer-payment-card">
+          <img
+            src="https://upload.wikimedia.org/wikipedia/commons/5/5e/Visa_Inc._logo.svg"
+            alt="Visa"
+          />
+        </div>
+        <div className="footer-payment-card">
+          <img
+            src="https://upload.wikimedia.org/wikipedia/commons/b/b0/Apple_Pay_logo.svg"
+            alt="Apple Pay"
+          />
+        </div>
+        <div className="footer-payment-card">
+          <img
+            src="https://upload.wikimedia.org/wikipedia/commons/f/f2/Google_Pay_Logo.svg"
+            alt="Google Pay"
+          />
+        </div>
+      </div>
       <span className="footer-line">
-        © {year} PassGen · {t('Developer')}: <a href="https://github.com/Jalal-Nasser" target="_blank" rel="noopener noreferrer">JalalNasser</a> · {t('Blog')}: <a href="https://jalalnasser.com" target="_blank" rel="noopener noreferrer">BlogiFy</a>
+        © {year} PassGen · {t('Developer')}: <a href="https://github.com/Jalal-Nasser" target="_blank" rel="noopener noreferrer">JalalNasser</a> · {t('Deployed by')}: <a href="https://mdeploy.dev" target="_blank" rel="noopener noreferrer">mDeploy</a>
         {' '}· <a href="#" onClick={(e)=>{e.preventDefault(); window.dispatchEvent(new Event('open-terms'))}}>{t('Terms')}</a>
         {' '}· <a href="#" onClick={(e)=>{e.preventDefault(); checkForUpdate()}}>{checking ? t('Checking...') : t('Check for Updates')}</a>
-        {' '}· {isPremium ? t('Premium member') : t('Free: 4 passwords')} {!isPremium && <><span>·</span> <a href="#" onClick={(e)=>{e.preventDefault(); window.dispatchEvent(new Event('open-upgrade'))}}>{t('Upgrade to Premium ($15 / 6 months)')}</a></>}
+        {' '}· {isPremium ? t('Premium member') : t('Free: 4 passwords')}
       </span>
       {updateMsg && <div style={{marginTop:4, fontSize:13, color:'#4a4'}}>{updateMsg}</div>}
     </footer>

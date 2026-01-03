@@ -136,6 +136,13 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({ title = 'PassGen
                     <span>{t('Keyboard Shortcuts')}</span>
                   </button>
                   <div className="menu-divider"></div>
+                  <button className="menu-dropdown-item" onClick={() => sendHelpAction('help:check-updates')}>
+                    <span>{t('Check for Updates')}</span>
+                  </button>
+                  <button className="menu-dropdown-item" onClick={() => sendHelpAction('help:releases')}>
+                    <span>{t('GitHub Releases')}</span>
+                  </button>
+                  <div className="menu-divider"></div>
                   <button className="menu-dropdown-item" onClick={() => sendHelpAction('help:about')}>
                     <span>{t('About PassGen')}</span>
                   </button>

@@ -40,7 +40,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               <div className="settings-premium-title">{t('Already Premium?')}</div>
               <div className="settings-premium-sub">{t('Sign in with Google to unlock cloud storage.')}</div>
               <button className="btn-secondary settings-google-btn" onClick={openPremiumSignIn}>
-                <img src="https://www.gstatic.com/images/branding/product/1x/googlelogo_light_color_92x30dp.png" alt="Google" />
+                <img src="./google-g.svg" alt="Google" />
                 {t('Continue with Google')}
               </button>
             </div>
