@@ -427,7 +427,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
                         </>
                       ) : (
                         <button type="button" className="secondary-btn premium-google-btn" onClick={handleAuthLogin} disabled={authBusy}>
-                          <img src="https://www.gstatic.com/images/branding/product/1x/googlelogo_light_color_92x30dp.png" alt="Google" />
+                          <img src="./google-g.svg" alt="Google" />
                           {authBusy ? t('Connecting...') : t('Continue with Google')}
                         </button>
                       )}

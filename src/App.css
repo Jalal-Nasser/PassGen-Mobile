@@ -18,7 +18,8 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;
+  min-height: 0;
   margin: 0;
 }
 
@@ -50,30 +51,59 @@
   flex-shrink: 0;
 }
 
+.footer-line {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  line-height: 1.4;
+}
+
+.footer-lang {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.footer-lang-select {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.footer-lang-select option {
+  color: #111;
+}
+
 .footer-payments {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 14px;
+  gap: 10px;
   flex-wrap: wrap;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
 
 .footer-payment-card {
   background: #fff;
   border-radius: 12px;
-  padding: 8px 14px;
+  padding: 6px 10px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 86px;
-  height: 44px;
+  min-width: 68px;
+  height: 34px;
 }
 
 .footer-payment-card img {
-  height: 22px;
-  max-width: 96px;
+  height: 16px;
+  max-width: 72px;
   object-fit: contain;
 }
 
@@ -88,14 +118,14 @@
 
 @media (max-width: 640px) {
   .footer-payment-card {
-    padding: 6px 10px;
-    min-width: 72px;
-    height: 38px;
+    padding: 4px 8px;
+    min-width: 60px;
+    height: 30px;
   }
 
   .footer-payment-card img {
-    height: 18px;
-    max-width: 84px;
+    height: 14px;
+    max-width: 68px;
   }
 }
 
@@ -169,7 +199,12 @@
   max-width: 450px;
   margin: 0 auto;
   text-align: center;
-  padding: 40px 20px;
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
 }
 
 .auth-logo {
@@ -211,6 +246,7 @@
   display: flex;
   flex-direction: column;
   gap: 20px;
+  width: 100%;
 }
 
 .password-input-wrapper {
