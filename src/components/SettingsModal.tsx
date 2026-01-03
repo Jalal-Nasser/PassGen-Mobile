@@ -17,6 +17,10 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     onClose()
     window.dispatchEvent(new Event('open-upgrade'))
   }
+  const handleResetApp = () => {
+    onClose()
+    window.dispatchEvent(new Event('reset-app'))
+  }
   if (!open) return null
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -51,6 +55,15 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
                 {t('Request Activation')}
               </button>
             </div>
+          </div>
+        </div>
+        <div className="settings-section">
+          <label>{t('Reset App')}</label>
+          <div className="settings-reset-card">
+            <div className="settings-premium-sub">{t('Clear local data and restart wizard')}</div>
+            <button className="settings-danger-btn" onClick={handleResetApp}>
+              {t('Reset App')}
+            </button>
           </div>
         </div>
         <div className="actions">

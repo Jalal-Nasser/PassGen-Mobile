@@ -50,7 +50,7 @@ function App() {
   const [passwordHintInput, setPasswordHintInput] = useState('')
   const [premiumTier, setPremiumTier] = useState(getPremiumTier())
   const isPremium = premiumTier !== 'free'
-  const { t } = useI18n()
+  const { t, isRTL } = useI18n()
 
   useEffect(() => {
     const openUpgrade = () => setShowUpgrade(true)
@@ -283,6 +283,12 @@ function App() {
     }, 50)
   }
 
+  useEffect(() => {
+    const handler = () => handleResetApp()
+    window.addEventListener('reset-app', handler)
+    return () => window.removeEventListener('reset-app', handler)
+  }, [handleResetApp])
+
   // Show onboarding for first-time users
   if (showSplash) {
     return <SplashScreen onComplete={() => setShowSplash(false)} />
@@ -296,11 +302,6 @@ function App() {
     <div className="app">
       <CustomTitleBar />
       <div className="container">
-        <div className="app-header">
-          <button className="link-btn" onClick={handleResetApp} title={t('Clear local data and restart wizard')}>
-            ↺ {t('Reset App')}
-          </button>
-        </div>
         {mode === 'setup' && (
           <StorageSetup open={true} onClose={() => {}} onConfigured={handleStorageConfigured} />
         )}
@@ -319,7 +320,7 @@ function App() {
                   value={masterPasswordInput}
                   onChange={(e) => setMasterPasswordInput(e.target.value)}
                   placeholder={localStorage.getItem('passgen-master-hash') ? t('Master Password (min 8 characters)') : t('Create Master Password (min 8 characters)')}
-                  className="auth-input ltr-input"
+                  className={`auth-input ${isRTL ? '' : 'ltr-input'}`}
                   onKeyPress={(e) => e.key === 'Enter' && handleMasterPasswordSubmit()}
                 />
                 <button
@@ -360,7 +361,7 @@ function App() {
                 </button>
               )}
               <p className="auth-note">
-                {t("This password encrypts/decrypts your stored passwords. Don't forget it!")}
+                {t("Master password unlocks your vault. Don't forget it.")}
               </p>
             </div>
           </div>

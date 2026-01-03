@@ -32,6 +32,18 @@ function AppFooter() {
             alt="Google Pay"
           />
         </div>
+        <div className="footer-payment-card">
+          <img
+            src="./paypal.svg"
+            alt="PayPal"
+          />
+        </div>
+        <div className="footer-payment-card">
+          <img
+            src="./bitcoin.svg"
+            alt="Bitcoin"
+          />
+        </div>
       </div>
       <span className="footer-line">
         © {year} PassGen · {t('Developer')}: <a href="https://github.com/Jalal-Nasser" target="_blank" rel="noopener noreferrer">JalalNasser</a> · {t('Deployed by')}: <a href="https://mdeploy.dev" target="_blank" rel="noopener noreferrer">mDeploy</a>

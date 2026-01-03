@@ -84,26 +84,26 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 6px;
   flex-wrap: wrap;
-  margin-bottom: 6px;
+  margin-bottom: 3px;
 }
 
 .footer-payment-card {
   background: #fff;
   border-radius: 12px;
-  padding: 6px 10px;
+  padding: 3px 6px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 68px;
-  height: 34px;
+  min-width: 48px;
+  height: 24px;
 }
 
 .footer-payment-card img {
-  height: 16px;
-  max-width: 72px;
+  height: 10px;
+  max-width: 48px;
   object-fit: contain;
 }
 
@@ -118,14 +118,14 @@
 
 @media (max-width: 640px) {
   .footer-payment-card {
-    padding: 4px 8px;
-    min-width: 60px;
-    height: 30px;
+    padding: 3px 5px;
+    min-width: 44px;
+    height: 22px;
   }
 
   .footer-payment-card img {
-    height: 14px;
-    max-width: 68px;
+    height: 9px;
+    max-width: 44px;
   }
 }
 
@@ -275,6 +275,16 @@
   box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
 }
 
+html[dir="rtl"] .auth-input {
+  direction: rtl;
+  text-align: right;
+  padding: 14px 16px 14px 48px;
+}
+
+html[dir="rtl"] .auth-input.hint-input {
+  padding: 14px 16px;
+}
+
 .toggle-password-btn {
   position: absolute;
   right: 12px;
@@ -327,9 +337,12 @@
 }
 
 .auth-note {
-  font-size: 0.9rem;
+  font-size: 0.8rem;
   color: #999;
   margin-top: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 

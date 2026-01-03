@@ -26,7 +26,7 @@ const translations: Record<Language, Record<string, string>> = {
     'Unlock Vault': 'فتح الخزنة',
     'Set Master Password': 'تعيين كلمة المرور الرئيسية',
     'Unlock with Passkey (Dev Only)': 'فتح عبر مفتاح المرور (نسخة التطوير)',
-    "This password encrypts/decrypts your stored passwords. Don't forget it!": 'هذه الكلمة تشفّر/تفك تشفير كلمات المرور المخزنة. لا تنسها!',
+    "Master password unlocks your vault. Don't forget it.": 'كلمة المرور الرئيسية تفتح خزنتك. لا تنسها.',
     'Incorrect master password. Please try again.': 'كلمة المرور الرئيسية غير صحيحة. حاول مرة أخرى.',
     'Passkey is not supported on this device': 'مفتاح المرور غير مدعوم على هذا الجهاز',
     'Passkey requires a secure context. Please use your master password.': 'يتطلب مفتاح المرور سياقًا آمنًا. يرجى استخدام كلمة المرور الرئيسية.',
