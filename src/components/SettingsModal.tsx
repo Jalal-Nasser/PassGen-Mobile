@@ -74,7 +74,14 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
       const store = new ConfigStore()
       store.setPasskeyCredential(credential.id, 'passkey-registered')
       setHasPasskey(true)
-      setPasskeyMessage(t('Passkey setup successful! You can now unlock with your biometric.'))
+      try {
+        await (window as any).electronAPI?.passkeyStoreKey?.(store.getInstallId())
+        setPasskeyMessage(t('Passkey setup successful! You can now unlock with your biometric.'))
+      } catch (error) {
+        setPasskeyMessage(t('Passkey created, but unlock is not enabled on this device. {{message}}', {
+          message: (error as Error).message || ''
+        }))
+      }
     } catch (e) {
       const errorMsg = (e as Error).message
       if (errorMsg.includes('cancel') || errorMsg.includes('dismissed')) {

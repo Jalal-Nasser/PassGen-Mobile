@@ -35,6 +35,8 @@ const translations: Record<Language, Record<string, string>> = {
     'Passkey verified! Now please enter your master password to unlock the vault.': 'تم التحقق من مفتاح المرور! الآن أدخل كلمة المرور الرئيسية لفتح الخزنة.',
     'Passkey verified. Enter your master password.': 'تم التحقق من مفتاح المرور. أدخل كلمة المرور الرئيسية.',
     'Passkey does not match. Please use your master password.': 'مفتاح المرور غير مطابق. يرجى استخدام كلمة المرور الرئيسية.',
+    'Passkey unlock failed: {{message}}': 'فشل فتح مفتاح المرور: {{message}}',
+    'Passkey created, but unlock is not enabled on this device. {{message}}': 'تم إنشاء مفتاح المرور، لكن الفتح غير مفعّل على هذا الجهاز. {{message}}',
     'Passkey verification cancelled.': 'تم إلغاء التحقق من مفتاح المرور.',
     'Passkey verification failed: {{message}}': 'فشل التحقق من مفتاح المرور: {{message}}',
     'Please select at least one character type': 'يرجى اختيار نوع واحد على الأقل من الأحرف',

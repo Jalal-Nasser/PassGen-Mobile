@@ -157,6 +157,14 @@ function App() {
       await storageManager.initializeEncryption(masterPasswordInput)
       setHasVault(true)
       setPasskeyNotice(null)
+      const cfg = new ConfigStore()
+      if (cfg.getPasskeyCredential()) {
+        try {
+          await storageManager.storePasskeyKey(cfg.getInstallId())
+        } catch (e) {
+          console.warn('Passkey key storage failed:', (e as Error).message)
+        }
+      }
     } catch (error) {
       alert((error as Error).message || t('Incorrect master password. Please try again.'))
       return
@@ -257,12 +265,16 @@ function App() {
       const match = stored === assertionId || (storedLooksHex && stored === assertionRawIdHex)
 
       if (match) {
-        // Passkey verified, need master password to initialize encryption
-        setMasterPasswordInput('')
-        setPasskeyNotice(t('Passkey verified. Enter your master password.'))
-        requestAnimationFrame(() => {
-          masterPasswordRef.current?.focus()
-        })
+        const cfg = new ConfigStore()
+        const installId = cfg.getInstallId()
+        try {
+          await storageManager.initializeEncryptionWithPasskey(installId)
+          setPasskeyNotice(null)
+          try { (window as any).electronAPI?.vaultUnlocked?.() } catch {}
+          setMode('vault')
+        } catch (e) {
+          alert(t('Passkey unlock failed: {{message}}', { message: (e as Error).message }))
+        }
       } else {
         alert(t('Passkey does not match. Please use your master password.'))
       }
@@ -331,6 +343,10 @@ function App() {
   const handleResetApp = () => {
     const proceed = confirm(t('Clear local data and restart the setup wizard. Continue?'))
     if (!proceed) return
+    try {
+      const cfg = new ConfigStore()
+      ;(window as any).electronAPI?.passkeyClearKey?.(cfg.getInstallId())
+    } catch {}
     storageManager.resetApp()
     setMasterPassword('')
     setMasterPasswordInput('')

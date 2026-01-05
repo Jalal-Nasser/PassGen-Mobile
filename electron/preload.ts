@@ -45,8 +45,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openVaultFile: () => ipcRenderer.invoke('vault:open'),
   registerPasskey: () => ipcRenderer.invoke('passkey:register'),
   verifyPasskey: () => ipcRenderer.invoke('passkey:verify'),
+  passkeyStoreKey: (installId: string) => ipcRenderer.invoke('passkey:storeKey', installId),
+  passkeyClearKey: (installId: string) => ipcRenderer.invoke('passkey:clearKey', installId),
   vaultStatus: () => ipcRenderer.invoke('vault:status'),
   vaultUnlock: (masterPassword: string) => ipcRenderer.invoke('vault:unlock', masterPassword),
+  vaultUnlockWithPasskey: (installId: string) => ipcRenderer.invoke('vault:unlockWithPasskey', installId),
   vaultList: () => ipcRenderer.invoke('vault:list'),
   vaultAdd: (entry: any) => ipcRenderer.invoke('vault:add', entry),
   vaultUpdate: (entry: any) => ipcRenderer.invoke('vault:update', entry),
@@ -94,6 +97,7 @@ declare global {
       getSessionToken: () => Promise<string>
       vaultStatus: () => Promise<{ hasVault: boolean; vaultPath: string; activeProviderId: string }>
       vaultUnlock: (masterPassword: string) => Promise<{ isNew: boolean }>
+      vaultUnlockWithPasskey: (installId: string) => Promise<{ ok: boolean }>
       vaultList: () => Promise<any[]>
       vaultAdd: (entry: any) => Promise<void>
       vaultUpdate: (entry: any) => Promise<void>
@@ -114,6 +118,8 @@ declare global {
       authGetMe: () => Promise<{ userId: string; email: string; plan: string; isPremium: boolean; expiresAt: string | null }>
       authLogout: () => Promise<{ ok: boolean }>
       licenseGetMe: () => Promise<{ email: string; plan: string; isPremium: boolean }>
+      passkeyStoreKey: (installId: string) => Promise<{ ok: boolean }>
+      passkeyClearKey: (installId: string) => Promise<{ ok: boolean }>
       onAuthUpdated: (handler: (session: any) => void) => () => void
     }
   }

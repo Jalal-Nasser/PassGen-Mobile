@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, Menu, dialog, clipboard, protocol } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, Menu, dialog, clipboard, protocol, safeStorage } from 'electron'
 import * as http from 'http'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -52,6 +52,90 @@ let appServer: http.Server | null = null; // Local app server for WebAuthn-safe 
 let appServerReady = false;
 const APP_SERVER_PORT = Number(process.env.PASSGEN_APP_SERVER_PORT) || 17864;
 const vaultRepository = new VaultRepository()
+const PASSKEY_SERVICE = 'passgen-vault-key'
+const PASSKEY_KEY_FILE = path.join(app.getPath('userData'), 'passkey.key')
+let keytarModule: any | null | undefined
+
+function getKeytarModule(): any | null {
+  if (keytarModule !== undefined) return keytarModule
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    keytarModule = require('keytar')
+  } catch {
+    keytarModule = null
+  }
+  return keytarModule
+}
+
+async function storePasskeyVaultKey(installId: string): Promise<void> {
+  const key = vaultRepository.getDerivedKey()
+  if (!key) {
+    throw new Error('Vault is locked')
+  }
+  const keytar = getKeytarModule()
+  if (keytar) {
+    await keytar.setPassword(PASSKEY_SERVICE, installId, key.toString('base64'))
+    return
+  }
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('Secure storage is unavailable. Install keytar to enable passkey unlock.')
+  }
+  const encrypted = safeStorage.encryptString(key.toString('base64'))
+  const payload = JSON.stringify({
+    installId,
+    key: encrypted.toString('base64')
+  })
+  await fs.promises.writeFile(PASSKEY_KEY_FILE, payload, 'utf8')
+}
+
+async function loadPasskeyVaultKey(installId: string): Promise<Buffer> {
+  const keytar = getKeytarModule()
+  if (keytar) {
+    const stored = await keytar.getPassword(PASSKEY_SERVICE, installId)
+    if (!stored) {
+      throw new Error('Passkey unlock is not enabled on this device')
+    }
+    return Buffer.from(stored, 'base64')
+  }
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('Secure storage is unavailable. Install keytar to enable passkey unlock.')
+  }
+  let raw = ''
+  try {
+    raw = await fs.promises.readFile(PASSKEY_KEY_FILE, 'utf8')
+  } catch {
+    throw new Error('Passkey unlock is not enabled on this device')
+  }
+  let parsed: { installId?: string; key?: string } = {}
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error('Passkey unlock is not enabled on this device')
+  }
+  if (!parsed.key || parsed.installId !== installId) {
+    throw new Error('Passkey unlock is not enabled on this device')
+  }
+  const encrypted = Buffer.from(parsed.key, 'base64')
+  const decrypted = safeStorage.decryptString(encrypted)
+  return Buffer.from(decrypted, 'base64')
+}
+
+async function clearPasskeyVaultKey(installId: string): Promise<void> {
+  const keytar = getKeytarModule()
+  if (keytar) {
+    try {
+      await keytar.deletePassword(PASSKEY_SERVICE, installId)
+    } catch {}
+    return
+  }
+  if (!safeStorage.isEncryptionAvailable()) return
+  try {
+    const raw = await fs.promises.readFile(PASSKEY_KEY_FILE, 'utf8')
+    const parsed = JSON.parse(raw)
+    if (!parsed || parsed.installId !== installId) return
+    await fs.promises.unlink(PASSKEY_KEY_FILE)
+  } catch {}
+}
 function resolveIconPath() {
   try {
     if (app.isPackaged) {
@@ -894,6 +978,31 @@ ipcMain.handle('vault:status', async () => {
 
 ipcMain.handle('vault:unlock', async (_event, masterPassword: string) => {
   return vaultRepository.unlock(masterPassword)
+})
+
+ipcMain.handle('vault:unlockWithPasskey', async (_event, installId: string) => {
+  if (!installId) {
+    throw new Error('Missing install id')
+  }
+  const key = await loadPasskeyVaultKey(installId)
+  await vaultRepository.unlockWithKey(key)
+  return { ok: true }
+})
+
+ipcMain.handle('passkey:storeKey', async (_event, installId: string) => {
+  if (!installId) {
+    throw new Error('Missing install id')
+  }
+  await storePasskeyVaultKey(installId)
+  return { ok: true }
+})
+
+ipcMain.handle('passkey:clearKey', async (_event, installId: string) => {
+  if (!installId) {
+    throw new Error('Missing install id')
+  }
+  await clearPasskeyVaultKey(installId)
+  return { ok: true }
 })
 
 ipcMain.handle('vault:list', async () => {

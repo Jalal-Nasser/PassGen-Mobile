@@ -151,25 +151,27 @@ export class VaultRepository {
       await this.writeLocalVault(created.file)
     }
 
-    if (this.pendingConfig) {
-      this.applyConfigToVault(this.pendingConfig)
-      await this.persistVault()
-      this.pendingConfig = null
-    }
-
-    if (this.pendingGoogleDrive) {
-      this.setGoogleDriveConfig(this.pendingGoogleDrive)
-      await this.persistVault()
-      this.pendingGoogleDrive = null
-    }
-
-    if (this.pendingAppAccount) {
-      this.vaultPayload.appAccount = this.pendingAppAccount
-      await this.persistVault()
-      this.pendingAppAccount = null
-    }
+    await this.applyPendingUpdates()
 
     return { isNew: !existed }
+  }
+
+  async unlockWithKey(key: Buffer): Promise<void> {
+    const vaultPath = this.getVaultPath()
+    if (!fs.existsSync(vaultPath)) {
+      throw new Error('Vault not found')
+    }
+    const raw = await fs.promises.readFile(vaultPath, 'utf8')
+    const parsed = parseVaultFile(raw)
+    const payload = await decryptVaultFileWithKey(parsed, key)
+    this.vaultPayload = payload
+    this.vaultHeader = parsed.header
+    this.derivedKey = key
+    await this.applyPendingUpdates()
+  }
+
+  getDerivedKey(): Buffer | null {
+    return this.derivedKey
   }
 
   async listEntries(): Promise<VaultEntry[]> {
@@ -414,6 +416,27 @@ export class VaultRepository {
         contentType: 'application/octet-stream',
         retainCount: DEFAULT_CLOUD_RETENTION
       })
+    }
+  }
+
+  private async applyPendingUpdates(): Promise<void> {
+    if (!this.vaultPayload) return
+    if (this.pendingConfig) {
+      this.applyConfigToVault(this.pendingConfig)
+      await this.persistVault()
+      this.pendingConfig = null
+    }
+
+    if (this.pendingGoogleDrive) {
+      this.setGoogleDriveConfig(this.pendingGoogleDrive)
+      await this.persistVault()
+      this.pendingGoogleDrive = null
+    }
+
+    if (this.pendingAppAccount) {
+      this.vaultPayload.appAccount = this.pendingAppAccount
+      await this.persistVault()
+      this.pendingAppAccount = null
     }
   }
 

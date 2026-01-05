@@ -25,6 +25,23 @@ export class StorageManager {
     await this.refreshProviderStatus()
   }
 
+  async initializeEncryptionWithPasskey(installId: string): Promise<void> {
+    const api = (window as any).electronAPI
+    if (!api?.vaultUnlockWithPasskey) {
+      throw new Error('Vault backend is not available')
+    }
+    await api.vaultUnlockWithPasskey(installId)
+    await this.refreshProviderStatus()
+  }
+
+  async storePasskeyKey(installId: string): Promise<void> {
+    const api = (window as any).electronAPI
+    if (!api?.passkeyStoreKey) {
+      throw new Error('Vault backend is not available')
+    }
+    await api.passkeyStoreKey(installId)
+  }
+
   async initializeStorage(config: StorageConfig): Promise<void> {
     const api = (window as any).electronAPI
     if (!api?.storageConfigure) {
