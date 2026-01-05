@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, Menu, dialog, clipboard } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, Menu, dialog, clipboard, protocol } from 'electron'
 import * as http from 'http'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -73,6 +73,34 @@ const ABOUT_DETAIL =
   'A secure password generator and vault.\n\nDeveloper: JalalNasser\nLicense: MIT\n\nFeatures:\n• Generate secure passwords\n• Encrypt and store passwords\n• Cloud sync (Premium)\n• Browser extension support\n\nPremium: $15 / 6 months for cloud sync and unlimited items.'
 
 const AUTH_PROTOCOL = 'passgen'
+const APP_PROTOCOL = 'passgen-app'
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: APP_PROTOCOL,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true
+    }
+  }
+])
+
+function registerAppProtocol() {
+  const distRoot = path.join(__dirname, '../dist')
+  protocol.registerFileProtocol(APP_PROTOCOL, (request, callback) => {
+    try {
+      const requestUrl = new URL(request.url)
+      let pathname = decodeURIComponent(requestUrl.pathname || '')
+      if (!pathname || pathname === '/') pathname = '/index.html'
+      const safePath = path.normalize(pathname).replace(/^(\.\.(\/|\\|$))+/, '')
+      const filePath = path.join(distRoot, safePath)
+      callback({ path: filePath })
+    } catch {
+      callback({ path: path.join(distRoot, 'index.html') })
+    }
+  })
+}
 
 function openDocumentation() {
   shell.openExternal(HELP_DOCS_URL)
@@ -487,9 +515,8 @@ function createWindow() {
     const devServerUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173'
     mainWindow.loadURL(devServerUrl)
   } else {
-    // file:// load (used in production and when PASSGEN_USE_FILE_DEV=true) to share the same origin/storage
-    const distIndex = path.join(__dirname, '../dist/index.html')
-    mainWindow.loadFile(distIndex)
+    const appUrl = `${APP_PROTOCOL}://localhost/index.html`
+    mainWindow.loadURL(appUrl)
   }
 
   mainWindow.on('closed', () => {
@@ -524,6 +551,77 @@ function createWindow() {
       console.error('[WINDOW] Error checking storage on load:', err)
     })
   })
+
+  mainWindow.webContents.once('did-finish-load', () => {
+    migrateFileLocalStorageToApp().catch((error) => {
+      console.warn('[MIGRATION] Failed:', (error as Error).message || error)
+    })
+  })
+}
+
+async function migrateFileLocalStorageToApp(): Promise<void> {
+  if (!mainWindow || !app.isPackaged) return
+  const currentUrl = mainWindow.webContents.getURL()
+  if (!currentUrl.startsWith(`${APP_PROTOCOL}://`)) return
+
+  const hasMigrated = await mainWindow.webContents.executeJavaScript(`
+    localStorage.getItem('passgen-migrated-to-app-scheme') === 'true'
+  `)
+  if (hasMigrated) return
+
+  const hasAppData = await mainWindow.webContents.executeJavaScript(`
+    Object.keys(localStorage).some(k => k.startsWith('passgen-'))
+  `)
+  if (hasAppData) {
+    await mainWindow.webContents.executeJavaScript(`
+      localStorage.setItem('passgen-migrated-to-app-scheme', 'true')
+    `)
+    return
+  }
+
+  const legacyWindow = new BrowserWindow({
+    show: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      webSecurity: true
+    }
+  })
+
+  try {
+    const legacyIndex = path.join(__dirname, '../dist/index.html')
+    await legacyWindow.loadFile(legacyIndex)
+    const legacyData = await legacyWindow.webContents.executeJavaScript(`
+      (() => {
+        const data = {};
+        Object.keys(localStorage)
+          .filter(k => k.startsWith('passgen-'))
+          .forEach((k) => { data[k] = localStorage.getItem(k); });
+        return data;
+      })()
+    `)
+
+    const entries = legacyData && typeof legacyData === 'object' ? Object.entries(legacyData as Record<string, string>) : []
+    if (entries.length > 0) {
+      const payload = JSON.stringify(legacyData)
+      await mainWindow.webContents.executeJavaScript(`
+        (() => {
+          const data = ${payload};
+          Object.entries(data).forEach(([k, v]) => {
+            if (typeof v === 'string') localStorage.setItem(k, v);
+          });
+          localStorage.setItem('passgen-migrated-to-app-scheme', 'true');
+        })()
+      `)
+      mainWindow.webContents.reload()
+    } else {
+      await mainWindow.webContents.executeJavaScript(`
+        localStorage.setItem('passgen-migrated-to-app-scheme', 'true')
+      `)
+    }
+  } finally {
+    legacyWindow.destroy()
+  }
 }
 
 // Window control IPC handlers
@@ -599,6 +697,7 @@ if (!gotTheLock) {
   // automatically persists localStorage to disk in app userData directory
 
   app.whenReady().then(() => {
+    registerAppProtocol()
     if (process.argv.includes('--vault-self-test')) {
       runVaultSelfTests()
         .then(() => app.quit())
@@ -953,7 +1052,7 @@ ipcMain.handle('passkey:register', async () => {
             throw new Error('Invalid credential type: ' + credential.type);
           }
           // Just store the credential ID, which is sufficient for verification
-          const credentialId = Array.from(new Uint8Array(credential.id)).map(b => ('0' + b.toString(16)).slice(-2)).join('');
+          const credentialId = credential.id;
           console.log('Passkey registered with ID:', credentialId);
           return {
             credentialId: credentialId,
@@ -989,7 +1088,7 @@ ipcMain.handle('passkey:verify', async () => {
         });
         if (!assertion) throw new Error('Passkey verification failed');
         return {
-          id: Array.from(new Uint8Array(assertion.id)).map(b => ('0' + b.toString(16)).slice(-2)).join(''),
+          id: assertion.id,
           verified: true
         };
       })()

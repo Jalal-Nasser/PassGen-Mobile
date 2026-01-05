@@ -387,10 +387,7 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
         return
       }
 
-      // Convert credential ID to hex string
-      const credentialId = Array.from(new Uint8Array(credential.id as any as ArrayBuffer))
-        .map(b => ('0' + b.toString(16)).slice(-2))
-        .join('')
+      const credentialId = credential.id
 
       store.setPasskeyCredential(credentialId, 'passkey-registered')
       alert(t('Passkey setup successful! You can now unlock with your biometric.'))
@@ -441,9 +438,7 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
               )}
               <button onClick={() => window.dispatchEvent(new Event('open-storage-setup'))}>{t('Premium Access')}</button>
               <button onClick={() => window.dispatchEvent(new Event('open-storage-setup'))}>{t('Change Storage')}</button>
-              {((import.meta as any)?.env?.DEV === true) && (
-                <button onClick={handleSetupPasskey} disabled={loading}>{t('Setup Passkey')}</button>
-              )}
+              <button onClick={handleSetupPasskey} disabled={loading}>{t('Setup Passkey')}</button>
               {premiumTier !== 'free' && (
                 <>
                   <button onClick={handleExport} disabled={loading}>{t('Export Vault Backup')}</button>

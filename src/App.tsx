@@ -34,6 +34,7 @@ function App() {
   const [masterPasswordInput, setMasterPasswordInput] = useState('')
   const [password, setPassword] = useState('')
   const [copied, setCopied] = useState(false)
+  const [hasVault, setHasVault] = useState(false)
   const [options, setOptions] = useState<PasswordOptions>({
     length: 16,
     uppercase: true,
@@ -113,8 +114,10 @@ function App() {
       ;(async () => {
         try {
           const status = await storageManager.getVaultStatus()
+          setHasVault(status.hasVault)
           setMode(status.hasVault ? 'auth' : 'setup')
         } catch {
+          setHasVault(false)
           setMode('setup')
         }
       })()
@@ -150,6 +153,7 @@ function App() {
 
       setMasterPassword(masterPasswordInput)
       await storageManager.initializeEncryption(masterPasswordInput)
+      setHasVault(true)
     } catch (error) {
       alert((error as Error).message || t('Incorrect master password. Please try again.'))
       return
@@ -195,12 +199,18 @@ function App() {
         return
       }
 
-      // Convert assertion ID to hex and compare with stored credential ID
-      const assertionId = Array.from(new Uint8Array(assertion.id as any as ArrayBuffer))
-        .map(b => ('0' + b.toString(16)).slice(-2))
-        .join('')
+      const assertionId = assertion.id as string
+      const toHex = (buf: ArrayBuffer) =>
+        Array.from(new Uint8Array(buf))
+          .map(b => ('0' + b.toString(16)).slice(-2))
+          .join('')
+      const assertionWithRaw = assertion as PublicKeyCredential
+      const assertionRawIdHex = assertionWithRaw?.rawId ? toHex(assertionWithRaw.rawId) : ''
+      const stored = cred.credentialId
+      const storedLooksHex = /^[0-9a-f]+$/i.test(stored) && stored.length % 2 === 0
+      const match = stored === assertionId || (storedLooksHex && stored === assertionRawIdHex)
 
-      if (assertionId === cred.credentialId) {
+      if (match) {
         // Passkey verified, need to get master password to initialize encryption
         alert(t('Passkey verified! Now please enter your master password to unlock the vault.'))
         setMasterPasswordInput('')
@@ -312,14 +322,14 @@ function App() {
               <img src="icon.png" alt="PassGen Logo" width="80" height="80" />
             </div>
             <h1 className="auth-title">PassGen</h1>
-            <p className="auth-subtitle">{localStorage.getItem('passgen-master-hash') ? t('Enter your master password') : t('Set a new master password')}</p>
+            <p className="auth-subtitle">{hasVault ? t('Enter your master password') : t('Set a new master password')}</p>
             <div className="auth-form">
               <div className="password-input-wrapper">
                 <input
                   type={showPassword ? "text" : "password"}
                   value={masterPasswordInput}
                   onChange={(e) => setMasterPasswordInput(e.target.value)}
-                  placeholder={localStorage.getItem('passgen-master-hash') ? t('Master Password (min 8 characters)') : t('Create Master Password (min 8 characters)')}
+                  placeholder={hasVault ? t('Master Password (min 8 characters)') : t('Create Master Password (min 8 characters)')}
                   className={`auth-input ${isRTL ? '' : 'ltr-input'}`}
                   onKeyPress={(e) => e.key === 'Enter' && handleMasterPasswordSubmit()}
                 />
@@ -340,7 +350,7 @@ function App() {
                   )}
                 </button>
               </div>
-              {!localStorage.getItem('passgen-master-hash') && (
+              {!hasVault && (
                 <input
                   type="text"
                   value={passwordHintInput}
@@ -349,15 +359,15 @@ function App() {
                   className="auth-input hint-input"
                 />
               )}
-              {passwordHint && localStorage.getItem('passgen-master-hash') && (
+              {passwordHint && hasVault && (
                 <p className="password-hint">💡 {t('Hint: {{hint}}', { hint: passwordHint })}</p>
               )}
               <button onClick={handleMasterPasswordSubmit} className="auth-btn">
-                {localStorage.getItem('passgen-master-hash') ? t('Unlock Vault') : t('Set Master Password')}
+                {hasVault ? t('Unlock Vault') : t('Set Master Password')}
               </button>
-              {((import.meta as any)?.env?.DEV === true) && localStorage.getItem('passgen-passkey-credential') && (
+              {localStorage.getItem('passgen-passkey-credential') && (
                 <button onClick={handlePasskeyUnlock} className="auth-btn auth-btn-secondary">
-                  {t('Unlock with Passkey (Dev Only)')}
+                  {t('Unlock with Passkey')}
                 </button>
               )}
               <p className="auth-note">
