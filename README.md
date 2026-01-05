@@ -89,6 +89,20 @@ Get the latest Windows installer from the public downloads repo:
 
 https://github.com/Jalal-Nasser/PassGen-Releases/releases
 
+## System Requirements
+
+### End Users (Desktop App)
+- OS: Windows 10/11 (x64). macOS 11+ / Ubuntu 20.04+ if you build your own installer.
+- CPU: 64-bit dual-core or better
+- RAM: 4 GB minimum (8 GB recommended)
+- Storage: 300 MB free (plus space for vault and backups)
+- Display: 1280×720 or higher
+- Internet: required for activation, cloud sync, and updates (local vault works offline after setup)
+
+### Passkey / Windows Hello (Optional)
+- Windows Hello enabled (PIN or biometric)
+- Secure origin (packaged app or dev running on localhost)
+
 ## Browser Extension (Beta)
 - Folder: `extension/`
 - Load as unpacked in Chrome/Edge (enable Developer Mode), then paste the session token from the Vault footer into the extension options.
