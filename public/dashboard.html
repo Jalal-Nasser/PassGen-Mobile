@@ -66,6 +66,19 @@
       padding: 2rem;
     }
 
+    .section-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .section-meta {
+      color: #64748b;
+      font-size: 0.85rem;
+    }
+
     .requests-table h2 {
       margin: 0 0 1rem 0;
       font-size: 1.5rem;
@@ -144,6 +157,22 @@
 
     .btn-activate:hover {
       background: #2563eb;
+    }
+
+    .action-buttons {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .btn-cancel {
+      background: #fef2f2;
+      color: #dc2626;
+      border: 1px solid #fecaca;
+    }
+
+    .btn-cancel:hover {
+      background: #fee2e2;
     }
 
     .activated-code {
@@ -276,6 +305,73 @@
       margin: 1rem 0;
     }
 
+    .license-panel {
+      margin-top: 2rem;
+      background: white;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+      padding: 1.5rem;
+    }
+
+    .license-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .license-form label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 0.35rem;
+    }
+
+    .license-form input,
+    .license-form select {
+      width: 100%;
+      padding: 0.65rem;
+      border-radius: 6px;
+      border: 1px solid #d1d5db;
+      font-size: 0.9rem;
+    }
+
+    .license-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      margin-bottom: 0.75rem;
+    }
+
+    .license-output {
+      background: #f8fafc;
+      border: 1px dashed #cbd5f5;
+      padding: 0.75rem;
+      border-radius: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+      white-space: pre-wrap;
+      min-height: 60px;
+      color: #334155;
+      margin-bottom: 1rem;
+    }
+
+    .license-table th,
+    .license-table td {
+      padding: 0.6rem 0.75rem;
+    }
+
+    .status-available {
+      background: #e0f2fe;
+      color: #0369a1;
+    }
+
+    .status-revoked {
+      background: #fee2e2;
+      color: #dc2626;
+    }
+
     @media (max-width: 768px) {
       .dashboard-header {
         padding: 1rem;
@@ -321,7 +417,9 @@
 
     <div class="dashboard-content">
       <div class="requests-table">
-        <h2>Activation Requests</h2>
+        <div class="section-heading">
+          <h2>Activation Requests</h2>
+        </div>
         <div id="messages"></div>
         <table id="requests-table">
           <thead>
@@ -340,6 +438,56 @@
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <div class="license-panel">
+        <div class="section-heading">
+          <h2>License Keys</h2>
+          <div class="section-meta" id="license-stats">Available: - · Redeemed: - · Revoked: -</div>
+        </div>
+        <div class="license-grid license-form">
+          <div>
+            <label for="license-count">Count</label>
+            <input id="license-count" type="number" min="1" max="200" value="20" />
+          </div>
+          <div>
+            <label for="license-plan">Plan</label>
+            <select id="license-plan">
+              <option value="cloud">cloud</option>
+              <option value="byos">byos</option>
+              <option value="pro">pro</option>
+            </select>
+          </div>
+          <div>
+            <label for="license-term">Term (days)</label>
+            <input id="license-term" type="number" min="1" value="180" />
+          </div>
+        </div>
+        <div class="license-actions">
+          <button class="btn btn-primary" id="generate-license-btn">Generate Keys</button>
+          <button class="btn btn-secondary" id="refresh-license-btn">Refresh</button>
+        </div>
+        <div class="license-output" id="license-output">Generated keys will appear here (only shown once).</div>
+
+        <div class="requests-table license-table">
+          <table id="license-table">
+            <thead>
+              <tr>
+                <th>Created</th>
+                <th>Status</th>
+                <th>Plan</th>
+                <th>Term</th>
+                <th>Redeemed By</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="license-tbody">
+              <tr>
+                <td colspan="6" style="text-align: center; padding: 2rem;">Loading...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
@@ -386,6 +534,8 @@
         const requestsResponse = await fetch('/api/requests');
         const requests = await requestsResponse.json();
         updateRequestsTable(requests);
+
+        await loadLicenseKeys();
       } catch (error) {
         showMessage('Error loading data: ' + error.message, 'error');
       }
@@ -426,11 +576,85 @@
 
     function getActionButton(request) {
       if (request.status === 'pending') {
-        return `<button class="btn btn-activate" onclick="activateRequest('${request.id}', '${request.install_id}', '${request.user_email}', '${request.payment_method}', ${request.payment_amount})">Activate</button>`;
+        return `
+          <div class="action-buttons">
+            <button class="btn btn-activate" onclick="activateRequest('${request.id}', '${request.install_id}', '${request.user_email}', '${request.payment_method}', ${request.payment_amount})">Activate</button>
+            <button class="btn btn-cancel" onclick="cancelRequest('${request.id}')">Cancel</button>
+          </div>
+        `;
       } else if (request.status === 'activated' && request.activation_code) {
         return `<span class="activated-code">${request.activation_code}</span>`;
       }
       return '-';
+    }
+
+    async function loadLicenseKeys() {
+      const response = await fetch('/api/license-keys?limit=200');
+      const keys = await response.json();
+      updateLicenseTable(keys);
+    }
+
+    function updateLicenseTable(keys) {
+      const tbody = document.getElementById('license-tbody');
+      tbody.innerHTML = '';
+
+      if (!Array.isArray(keys) || keys.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 2rem;">No keys found</td></tr>';
+        return;
+      }
+
+      let available = 0;
+      let redeemed = 0;
+      let revoked = 0;
+
+      keys.forEach((row) => {
+        if (row.status === 'available') available++;
+        if (row.status === 'redeemed') redeemed++;
+        if (row.status === 'revoked') revoked++;
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${new Date(row.created_at).toLocaleDateString()}</td>
+          <td><span class="status status-${row.status}">${row.status}</span></td>
+          <td>${row.plan || '-'}</td>
+          <td>${row.term_days || '-'} days</td>
+          <td>${row.redeemed_by_user_id ? row.redeemed_by_user_id.slice(0, 8) + '...' : '-'}</td>
+          <td>${row.status === 'available' ? `<button class="btn btn-secondary" onclick="revokeLicense('${row.id}')">Revoke</button>` : '-'}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      document.getElementById('license-stats').textContent = `Available: ${available} · Redeemed: ${redeemed} · Revoked: ${revoked}`;
+    }
+
+    async function generateLicenseKeys() {
+      const count = Number(document.getElementById('license-count').value || 1);
+      const plan = document.getElementById('license-plan').value;
+      const termDays = Number(document.getElementById('license-term').value || 180);
+
+      const response = await fetch('/api/license-keys/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count, plan, termDays })
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to generate keys');
+      }
+
+      const output = document.getElementById('license-output');
+      output.textContent = (result.keys || []).join('\n') || 'No keys returned.';
+      await loadLicenseKeys();
+    }
+
+    async function revokeLicense(id) {
+      await fetch(`/api/license-keys/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'revoked' })
+      });
+      await loadLicenseKeys();
     }
 
     async function activateRequest(id, installId, email, paymentMethod, paymentAmount) {
@@ -538,6 +762,27 @@
       }
     }
 
+    async function cancelRequest(id) {
+      const ok = confirm('Cancel this activation request?');
+      if (!ok) return;
+
+      try {
+        await fetch(`/api/requests/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            status: 'rejected',
+            notes: 'Cancelled by admin'
+          })
+        });
+
+        showMessage('Request cancelled.', 'success');
+        loadData();
+      } catch (error) {
+        showMessage('Error cancelling request: ' + error.message, 'error');
+      }
+    }
+
     function showMessage(message, type) {
       const messages = document.getElementById('messages');
       messages.innerHTML = `<div class="${type}">${message}</div>`;
@@ -551,6 +796,14 @@
     document.getElementById('cancel-btn').addEventListener('click', () => {
       document.getElementById('activation-modal').style.display = 'none';
       currentRequest = null;
+    });
+
+    document.getElementById('generate-license-btn').addEventListener('click', () => {
+      generateLicenseKeys().catch((error) => showMessage('License generation failed: ' + error.message, 'error'));
+    });
+
+    document.getElementById('refresh-license-btn').addEventListener('click', () => {
+      loadLicenseKeys().catch((error) => showMessage('License refresh failed: ' + error.message, 'error'));
     });
 
     // Load data on page load

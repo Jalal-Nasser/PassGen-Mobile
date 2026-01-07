@@ -5,6 +5,7 @@ const express = require('express')
 const path = require('path')
 const { createClient } = require('@supabase/supabase-js')
 const axios = require('axios')
+const crypto = require('crypto')
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -19,6 +20,30 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ylzxeyqlqvziwnradcmy.supabase.co',
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlsenhleXFscXZ6aXducmFkY215Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU0NjIzMTAsImV4cCI6MjA4MTAzODMxMH0.e-0bhGJnlEC_hJ-DUiICu9KoZ0753bSp4QaIuamNG7o'
 )
+
+const LICENSE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+const LICENSE_PREFIX = 'PASSGEN'
+
+function randomChunk(length = 4) {
+  let out = ''
+  for (let i = 0; i < length; i++) {
+    const idx = crypto.randomInt(0, LICENSE_ALPHABET.length)
+    out += LICENSE_ALPHABET[idx]
+  }
+  return out
+}
+
+function generateLicenseKey() {
+  return `${LICENSE_PREFIX}-${randomChunk()}-${randomChunk()}-${randomChunk()}-${randomChunk()}`
+}
+
+function normalizeLicenseKey(key) {
+  return String(key || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+}
+
+function hashLicenseKey(key) {
+  return crypto.createHash('sha256').update(normalizeLicenseKey(key)).digest('hex')
+}
 
 // Discord webhook function
 async function sendDiscordNotification(embed) {
@@ -147,6 +172,79 @@ app.put('/api/requests/:id', async (req, res) => {
     const { data, error } = await supabase
       .from('activation_requests')
       .update(updateData)
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (error) throw error
+    res.json(data)
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// License keys list
+app.get('/api/license-keys', async (req, res) => {
+  try {
+    const status = String(req.query.status || '').trim()
+    const limit = Math.min(Number(req.query.limit || 200) || 200, 500)
+    let query = supabase
+      .from('license_keys')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit)
+
+    if (status) query = query.eq('status', status)
+
+    const { data, error } = await query
+    if (error) throw error
+    res.json(data || [])
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Generate license keys (one-time)
+app.post('/api/license-keys/generate', async (req, res) => {
+  try {
+    const count = Math.max(1, Math.min(Number(req.body.count || 1) || 1, 200))
+    const plan = String(req.body.plan || 'cloud').toLowerCase()
+    const termDays = Math.max(1, Number(req.body.termDays || 180) || 180)
+
+    const keys = new Set()
+    while (keys.size < count) {
+      keys.add(generateLicenseKey())
+    }
+
+    const rows = Array.from(keys).map((key) => ({
+      key_hash: hashLicenseKey(key),
+      plan,
+      term_days: termDays,
+      status: 'available'
+    }))
+
+    const { error } = await supabase
+      .from('license_keys')
+      .insert(rows)
+
+    if (error) throw error
+
+    res.json({ keys: Array.from(keys), count })
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Update license key status (revoke)
+app.put('/api/license-keys/:id', async (req, res) => {
+  try {
+    const { id } = req.params
+    const status = String(req.body.status || '').trim()
+    if (!status) return res.status(400).json({ error: 'Missing status' })
+
+    const { data, error } = await supabase
+      .from('license_keys')
+      .update({ status })
       .eq('id', id)
       .select()
       .single()

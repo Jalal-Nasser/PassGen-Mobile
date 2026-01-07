@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { StorageConfig, ProviderId } from '../services/storageTypes'
-import { applyRemoteLicense } from '../services/license'
+import { applyRemoteLicense, type PremiumTier } from '../services/license'
 import { ConfigStore } from '../services/configStore'
 import './StorageSetup.css'
 import { useI18n } from '../services/i18n'
@@ -28,7 +28,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
   const [authBusy, setAuthBusy] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
   const [licenseError, setLicenseError] = useState<string | null>(null)
-  const [cloudEnabled, setCloudEnabled] = useState(false)
+  const [planTier, setPlanTier] = useState<PremiumTier>('free')
   const [licenseStatus, setLicenseStatus] = useState<{ email?: string; plan?: string; isPremium?: boolean } | null>(null)
   const [appAccount, setAppAccount] = useState<{
     email?: string
@@ -48,6 +48,8 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
   })
   const [s3Testing, setS3Testing] = useState(false)
   const [s3TestResult, setS3TestResult] = useState<string | null>(null)
+  const allowGoogle = planTier === 'cloud' || planTier === 'byos'
+  const allowS3 = planTier === 'byos'
 
   useEffect(() => {
     if (!open) return
@@ -89,14 +91,14 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
         setAppAccount((prev: any) => ({ ...(prev || {}), ...me }))
         setLicenseStatus(me)
         syncPremiumFromMe(me)
-        setCloudEnabled(!!me?.isPremium)
+        setPlanTier(normalizePlan(me?.plan, me?.isPremium))
         setLicenseError(null)
       } catch (error) {
         console.log('[LICENSE DEBUG] error', error)
         const { message, isAuthError } = formatLicenseError(error)
         setLicenseError(message)
         setLicenseStatus(null)
-        setCloudEnabled(false)
+        setPlanTier('free')
         if (isAuthError) {
           setAppAccount(null)
         }
@@ -116,7 +118,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
       setAuthError(null)
       if (!session?.email) {
         syncPremiumFromMe(null)
-        setCloudEnabled(false)
+        setPlanTier('free')
         setLicenseStatus(null)
         return
       }
@@ -128,7 +130,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
           setAppAccount((prev: any) => ({ ...(prev || {}), ...me }))
           setLicenseStatus(me)
           syncPremiumFromMe(me)
-          setCloudEnabled(!!me?.isPremium)
+          setPlanTier(normalizePlan(me?.plan, me?.isPremium))
           setLicenseError(null)
         })
         .catch((error: Error) => {
@@ -136,7 +138,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
           const { message, isAuthError } = formatLicenseError(error)
           setLicenseError(message)
           setLicenseStatus(null)
-          setCloudEnabled(false)
+          setPlanTier('free')
           if (isAuthError) {
             setAppAccount(null)
           }
@@ -175,9 +177,19 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
     applyRemoteLicense(me)
   }
 
+  const normalizePlan = (plan?: string, isPremium?: boolean): PremiumTier => {
+    const raw = String(plan || '').toLowerCase()
+    if (raw === 'pro' || raw === 'cloud' || raw === 'byos') return raw
+    return isPremium ? 'cloud' : 'free'
+  }
+
   const handleProviderSelect = (next: ProviderId) => {
     if (next === 'dropbox' || next === 'onedrive') return
-    if (next === 's3-compatible' && !cloudEnabled) {
+    if (next === 'google-drive' && !allowGoogle) {
+      window.dispatchEvent(new Event('open-upgrade'))
+      return
+    }
+    if (next === 's3-compatible' && !allowS3) {
       window.dispatchEvent(new Event('open-upgrade'))
       return
     }
@@ -185,7 +197,11 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
   }
 
   const handleContinue = () => {
-    if (provider === 's3-compatible' && !cloudEnabled) {
+    if (provider === 'google-drive' && !allowGoogle) {
+      window.dispatchEvent(new Event('open-upgrade'))
+      return
+    }
+    if (provider === 's3-compatible' && !allowS3) {
       window.dispatchEvent(new Event('open-upgrade'))
       return
     }
@@ -223,13 +239,16 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
       setAppAccount((prev: any) => ({ ...(prev || {}), ...me }))
       setLicenseStatus(me)
       syncPremiumFromMe(me)
-      setCloudEnabled(!!me?.isPremium)
+      const nextTier = normalizePlan(me?.plan, me?.isPremium)
+      setPlanTier(nextTier)
       setLicenseError(null)
       if (!me?.email) {
         setGoogleError(t('App account required to continue.'))
         return
       }
-      if (!me?.isPremium) {
+      const canUseGoogle = nextTier === 'cloud' || nextTier === 'byos'
+      if (!canUseGoogle) {
+        setGoogleError(t('Upgrade to Cloud or BYOS to enable Google Drive.'))
         window.dispatchEvent(new Event('open-upgrade'))
         return
       }
@@ -237,7 +256,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
       const { message, isAuthError } = formatLicenseError(error)
       setLicenseError(message)
       setLicenseStatus(null)
-      setCloudEnabled(false)
+      setPlanTier('free')
       if (isAuthError) {
         setAppAccount(null)
       }
@@ -309,7 +328,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
       await api.authLogout()
       setAppAccount(null)
       syncPremiumFromMe(null)
-      setCloudEnabled(false)
+      setPlanTier('free')
       setLicenseError(null)
     } catch (error) {
       const message = t('Connection failed: {{message}}', { message: (error as Error).message })
@@ -351,8 +370,12 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
       alert(t('App account required to continue.'))
       return
     }
-    if ((provider === 'google-drive' || provider === 's3-compatible') && !cloudEnabled) {
-      alert(t('Upgrade to Premium to enable Google Drive.'))
+    if (provider === 'google-drive' && !allowGoogle) {
+      alert(t('Upgrade to Cloud or BYOS to enable Google Drive.'))
+      return
+    }
+    if (provider === 's3-compatible' && !allowS3) {
+      alert(t('Upgrade to BYOS to enable S3-compatible storage.'))
       return
     }
 
@@ -461,7 +484,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
                   {`signedIn=${!!appAccount?.email} `}
                   {`meStatus=${licenseStatus ? `${licenseStatus.email || '-'} / ${licenseStatus.plan || '-'} / ${licenseStatus.isPremium ? 'premium' : 'free'}` : 'none'} `}
                   {`lastLicenseError=${licenseError || 'none'} `}
-                  {`cloudEnabled=${cloudEnabled}`}
+                  {`planTier=${planTier} allowGoogle=${allowGoogle} allowS3=${allowS3}`}
                 </div>
               )}
             <div className="provider-selection">
@@ -483,13 +506,14 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
                 </div>
               </label>
 
-              <label className="provider-option" onClick={() => handleProviderSelect('google-drive')}>
+              <label className={`provider-option ${!allowGoogle ? 'disabled' : ''}`} onClick={() => handleProviderSelect('google-drive')}>
                 <input
                   type="radio"
                   name="provider"
                   value="google-drive"
                   checked={provider === 'google-drive'}
                   onChange={() => handleProviderSelect('google-drive')}
+                  disabled={!allowGoogle}
                 />
                 <img src="https://www.gstatic.com/images/branding/product/1x/drive_2020q4_48dp.png" alt="Google Drive" className="provider-icon" />
                 <div className="provider-info">
@@ -501,14 +525,14 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
                 </div>
               </label>
 
-              <label className={`provider-option ${!cloudEnabled ? 'disabled' : ''}`} onClick={() => handleProviderSelect('s3-compatible')}>
+              <label className={`provider-option ${!allowS3 ? 'disabled' : ''}`} onClick={() => handleProviderSelect('s3-compatible')}>
                 <input
                   type="radio"
                   name="provider"
                   value="s3-compatible"
                   checked={provider === 's3-compatible'}
                   onChange={() => handleProviderSelect('s3-compatible')}
-                  disabled={!cloudEnabled}
+                  disabled={!allowS3}
                 />
                 <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/b/bc/Amazon-S3-Logo.svg/428px-Amazon-S3-Logo.svg.png" alt="S3 Compatible" className="provider-icon" />
                 <div className="provider-info">
@@ -660,7 +684,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
                             type="button"
                             className="secondary-btn"
                             onClick={handleGoogleConnect}
-                            disabled={googleBusy || !appAccount?.email || !cloudEnabled}
+                            disabled={googleBusy || !appAccount?.email || !allowGoogle}
                           >
                             {googleBusy ? t('Connecting...') : t('Connect')}
                           </button>
@@ -675,10 +699,10 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
                     )}
                     <p className="help-text">{t('Google Drive stores only encrypted vault snapshots. No plaintext ever leaves this device.')}</p>
                     {!appAccount?.email && <p className="help-text">{t('App account required to continue.')}</p>}
-                    {appAccount?.email && !cloudEnabled && (
+                    {appAccount?.email && !allowGoogle && (
                       <div className="upgrade-inline">
                         <p className="help-text error-text">
-                          {t('Upgrade to Premium to enable Google Drive.')}
+                          {t('Upgrade to Cloud or BYOS to enable Google Drive.')}
                         </p>
                         <button type="button" className="link-btn" onClick={() => window.dispatchEvent(new Event('open-upgrade'))}>
                           {t('Upgrade')}

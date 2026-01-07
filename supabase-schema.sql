@@ -72,6 +72,22 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS license_keys (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  key_hash TEXT UNIQUE NOT NULL,
+  plan TEXT DEFAULT 'cloud' NOT NULL,
+  status TEXT CHECK (status IN ('available', 'redeemed', 'revoked')) DEFAULT 'available' NOT NULL,
+  term_days INTEGER DEFAULT 180 NOT NULL,
+  redeemed_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  redeemed_device_id TEXT,
+  redeemed_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_license_keys_status ON license_keys(status);
+CREATE INDEX IF NOT EXISTS idx_license_keys_redeemed_user ON license_keys(redeemed_by_user_id);
+CREATE INDEX IF NOT EXISTS idx_license_keys_created_at ON license_keys(created_at DESC);
+
 CREATE TABLE IF NOT EXISTS devices (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
@@ -99,6 +115,7 @@ CREATE INDEX IF NOT EXISTS idx_desktop_tokens_user ON desktop_tokens(user_id);
 
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE license_keys ENABLE ROW LEVEL SECURITY;
 ALTER TABLE devices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE desktop_tokens ENABLE ROW LEVEL SECURITY;
 
@@ -108,6 +125,10 @@ CREATE POLICY "Allow all operations on users" ON users
 
 DROP POLICY IF EXISTS "Allow all operations on subscriptions" ON subscriptions;
 CREATE POLICY "Allow all operations on subscriptions" ON subscriptions
+  FOR ALL USING (true);
+
+DROP POLICY IF EXISTS "Allow all operations on license_keys" ON license_keys;
+CREATE POLICY "Allow all operations on license_keys" ON license_keys
   FOR ALL USING (true);
 
 DROP POLICY IF EXISTS "Allow all operations on devices" ON devices;

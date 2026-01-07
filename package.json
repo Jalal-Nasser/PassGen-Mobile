@@ -1,6 +1,6 @@
 {
   "name": "passgen",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "A secure password generator desktop application",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -13,6 +13,7 @@
     "test:oauth": "tsc && electron . --oauth-ipc-test",
     "test:auth": "tsc && electron . --auth-test",
     "gen:activation": "node scripts/generate-activation.js",
+    "gen:license-keys": "node scripts/generate-license-keys.js",
     "dashboard": "node dashboard-server.js",
     "discord-bot": "node discord-bot.js"
   },

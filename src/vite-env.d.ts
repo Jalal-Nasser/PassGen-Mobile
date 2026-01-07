@@ -19,6 +19,7 @@ declare interface Window {
 		authGetMe: () => Promise<{ userId: string; email: string; plan: string; isPremium: boolean; expiresAt: string | null }>
 		authLogout: () => Promise<{ ok: boolean }>
 		licenseGetMe: () => Promise<{ email: string; plan: string; isPremium: boolean }>
+		licenseRedeem: (payload: { licenseKey: string; deviceId?: string }) => Promise<{ isPremium: boolean; plan: string; expiresAt?: string | null }>
 		onAuthUpdated: (handler: (session: any) => void) => () => void
 	}
 }

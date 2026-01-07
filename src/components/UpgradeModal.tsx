@@ -22,7 +22,6 @@ export default function UpgradeModal({ open, onClose }: UpgradeModalProps) {
   const [appAccount, setAppAccount] = useState<{ email?: string } | null>(null)
   const [authBusy, setAuthBusy] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
-  const showTestVerify = ((import.meta as any)?.env?.DEV as boolean) === true
 
   useEffect(() => {
     if (open) {
@@ -83,9 +82,8 @@ export default function UpgradeModal({ open, onClose }: UpgradeModalProps) {
     }
   }
 
-  const [code, setCode] = useState('')
-  const [testResult, setTestResult] = useState<string>('')
-  const [devSecret, setDevSecret] = useState<string>(showTestVerify ? store.getSellerSecretForDebug() : '')
+  const [licenseKey, setLicenseKey] = useState('')
+  const [redeeming, setRedeeming] = useState(false)
   const ensureAppAccount = async (): Promise<boolean> => {
     const api = (window as any).electronAPI
     if (!api?.authGetSession) {
@@ -136,32 +134,30 @@ export default function UpgradeModal({ open, onClose }: UpgradeModalProps) {
     }
   }
 
-  const activateWithCode = async () => {
-    if (!code) { alert(t('Enter activation code')); return }
-    if (!userEmail) { alert(t('Enter your email first')); return }
-    if (!store.verifyActivationCode(code, userEmail)) {
-      alert(t('Invalid activation code.'))
-      return
-    }
+  const redeemLicenseKey = async () => {
+    if (!licenseKey) { alert(t('Enter license key')); return }
     const hasAccount = await ensureAppAccount()
     if (!hasAccount) {
       return
     }
     try {
+      setRedeeming(true)
       const api = (window as any).electronAPI
-      if (!api?.licenseGetMe) {
+      if (!api?.licenseRedeem) {
         throw new Error('License backend is not available')
       }
-      const me = await api.licenseGetMe()
-      applyRemoteLicense(me)
-      if (me?.isPremium) {
+      const result = await api.licenseRedeem({ licenseKey, deviceId: installId })
+      applyRemoteLicense(result)
+      if (result?.isPremium) {
         onClose()
         alert(t('Premium activated. Enjoy!'))
       } else {
         alert(t('Activation pending. Please contact support if it does not update soon.'))
       }
     } catch (e:any) {
-      alert(t('Connection failed: {{message}}', { message: e.message }))
+      alert(t('License redeem failed: {{message}}', { message: e.message }))
+    } finally {
+      setRedeeming(false)
     }
   }
 
@@ -181,20 +177,6 @@ export default function UpgradeModal({ open, onClose }: UpgradeModalProps) {
     } catch {
       alert(t('Failed to copy address'))
     }
-  }
-
-  const testVerify = () => {
-    if (!code || !userEmail) { setTestResult(t('Enter email and code')); return }
-    const ok = store.verifyActivationCode(code, userEmail)
-    setTestResult(ok ? t('✓ Code matches (dev test)') : t('✗ Code does not match'))
-  }
-
-  const generateCode = async () => {
-    if (!userEmail) { setTestResult(t('Enter email first')); return }
-    const generated = store.computeActivationCode(userEmail)
-    setCode(generated)
-    try { await copyText(generated) } catch {}
-    setTestResult(t('✓ Generated & copied: {{code}}', { code: generated }))
   }
 
   if (!open) return null
@@ -316,14 +298,14 @@ export default function UpgradeModal({ open, onClose }: UpgradeModalProps) {
           </div>
         </div>
 
-        <div className="activation-card">
-          <div className="section-heading">
-            <span className="pill accent">{t('Step 3')}</span>
-            <div>
-              <div className="section-title">{t('Request activation after payment')}</div>
-              <div className="section-sub">{t('Share your email, then paste the code you get back to unlock Premium.')}</div>
+          <div className="activation-card">
+            <div className="section-heading">
+              <span className="pill accent">{t('Step 3')}</span>
+              <div>
+                <div className="section-title">{t('Request activation after payment')}</div>
+                <div className="section-sub">{t('Share your email, then paste your license key to unlock Premium.')}</div>
+              </div>
             </div>
-          </div>
           <div className="activation-fields">
             <div className="email-capture subtle">
               <label>{t('Install ID (for support)')}</label>
@@ -355,12 +337,12 @@ export default function UpgradeModal({ open, onClose }: UpgradeModalProps) {
               />
             </div>
             <div className="email-capture">
-              <label>{t('Activation Code')}</label>
+              <label>{t('License Key')}</label>
               <input
                 type="text"
-                placeholder={t('Enter code from seller')}
-                value={code}
-                onChange={(e)=>setCode(e.target.value)}
+                placeholder={t('Enter license key')}
+                value={licenseKey}
+                onChange={(e)=>setLicenseKey(e.target.value)}
                 className="ltr-input"
               />
             </div>
@@ -369,34 +351,11 @@ export default function UpgradeModal({ open, onClose }: UpgradeModalProps) {
             <button className="btn-secondary" disabled={sending || sent} onClick={requestActivation}>
               {sent ? t('Request Sent') : sending ? t('Sending...') : t('Request Activation')}
             </button>
-            <button className="btn-primary" onClick={activateWithCode}>{t('Activate')}</button>
-            {showTestVerify && (
-              <>
-                <button className="btn-secondary" onClick={testVerify}>{t('Test Verify (dev)')}</button>
-                <button className="btn-secondary" onClick={generateCode}>{t('Generate Code (dev)')}</button>
-              </>
-            )}
+            <button className="btn-primary" onClick={redeemLicenseKey} disabled={redeeming}>
+              {redeeming ? t('Redeeming...') : t('Redeem Key')}
+            </button>
             <button className="btn-secondary ghost" onClick={onClose}>{t('Close')}</button>
           </div>
-          {showTestVerify && testResult && (
-            <div className="dev-hint">{testResult}</div>
-          )}
-          {showTestVerify && (
-            <div className="dev-secret">
-              <label>{t('Seller Secret (dev only, stored locally)')}</label>
-              <div className="input-with-button">
-                <input
-                  type="text"
-                  placeholder={t('override secret for testing')}
-                  value={devSecret}
-                  onChange={(e)=>setDevSecret(e.target.value)}
-                  className="ltr-input"
-                />
-                <button className="btn-secondary" onClick={()=>{ store.setSellerSecretForDebug(devSecret); setTestResult(t('Secret updated locally')); }}>{t('Save')}</button>
-              </div>
-              <small>{t('Used to compute codes during development/testing without rebuild.')}</small>
-            </div>
-          )}
         </div>
       </div>
     </div>

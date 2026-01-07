@@ -63,6 +63,14 @@ npm install express resend
 - 📧 Automated email notifications
 - 🔍 Track payment methods and revenue
 
+### License Keys (One-time)
+To sell pre-generated keys (for online stores), use:
+```bash
+npm run gen:license-keys -- --count 20 --plan cloud --termDays 180
+```
+- Requires `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to insert hashes into Supabase.
+- Keys are stored **hashed** only; keep the printed keys safe for distribution.
+
 ### Database Schema
 The dashboard uses Supabase with the following tables:
 - `activation_requests` - Stores user activation requests

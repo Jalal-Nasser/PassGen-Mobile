@@ -1104,6 +1104,67 @@ ipcMain.handle('license:getMe', async () => {
   return { email: data.email, plan: data.plan, isPremium: data.isPremium }
 })
 
+ipcMain.handle('license:redeem', async (_event, payload: { licenseKey: string; deviceId?: string }) => {
+  const baseUrl = (() => {
+    try {
+      return getVercelBaseUrl()
+    } catch (error) {
+      console.warn('[LICENSE DEBUG] Missing VERCEL_APP_URL:', (error as Error).message)
+      return ''
+    }
+  })()
+  if (!baseUrl) {
+    throw new Error('VERCEL_APP_URL is not configured')
+  }
+
+  const session = await loadDesktopSession(vaultRepository)
+  if (!session?.accessToken) {
+    throw new Error('Not authenticated / invalid desktop token')
+  }
+
+  const requestUrl = `${baseUrl}/api/license/redeem`
+  const body = {
+    licenseKey: String(payload?.licenseKey || ''),
+    deviceId: payload?.deviceId ? String(payload.deviceId) : undefined
+  }
+
+  let response = await fetch(requestUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.accessToken}`
+    },
+    body: JSON.stringify(body)
+  })
+
+  if (response.status === 401 && session.refreshToken) {
+    const refreshed = await refreshDesktopSession(session)
+    response = await fetch(requestUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${refreshed.accessToken}`
+      },
+      body: JSON.stringify(body)
+    })
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    throw new Error('Not authenticated / invalid desktop token')
+  }
+
+  const text = await response.text()
+  if (!response.ok) {
+    throw new Error(text || `License redeem failed (${response.status})`)
+  }
+
+  try {
+    return JSON.parse(text)
+  } catch {
+    return { ok: true }
+  }
+})
+
 ipcMain.handle('storage:configure', async (_event, config) => {
   return vaultRepository.configureStorage(config)
 })

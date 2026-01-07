@@ -70,6 +70,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   authGetMe: () => ipcRenderer.invoke('auth:getMe'),
   authLogout: () => ipcRenderer.invoke('auth:logout'),
   licenseGetMe: () => ipcRenderer.invoke('license:getMe'),
+  licenseRedeem: (payload: { licenseKey: string; deviceId?: string }) => ipcRenderer.invoke('license:redeem', payload),
   onAuthUpdated: (handler: (session: any) => void) => {
     const listener = (_event: any, session: any) => handler(session)
     ipcRenderer.on('auth:updated', listener)
@@ -118,6 +119,7 @@ declare global {
       authGetMe: () => Promise<{ userId: string; email: string; plan: string; isPremium: boolean; expiresAt: string | null }>
       authLogout: () => Promise<{ ok: boolean }>
       licenseGetMe: () => Promise<{ email: string; plan: string; isPremium: boolean }>
+      licenseRedeem: (payload: { licenseKey: string; deviceId?: string }) => Promise<{ isPremium: boolean; plan: string; expiresAt?: string | null }>
       passkeyStoreKey: (installId: string) => Promise<{ ok: boolean }>
       passkeyClearKey: (installId: string) => Promise<{ ok: boolean }>
       onAuthUpdated: (handler: (session: any) => void) => () => void
