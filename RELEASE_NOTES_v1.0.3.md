@@ -19,4 +19,4 @@
 3. Enter the code in the app and click Activate
 
 ---
-For help or to report issues, visit: https://github.com/Jalal-Nasser/PassGen-Releases/issues
+For help or to report issues, visit: https://github.com/mDeploys/PassGen/issues

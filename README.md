@@ -98,7 +98,7 @@ The dashboard uses Supabase with the following tables:
 
 Get the latest Windows installer from the public downloads repo:
 
-https://github.com/Jalal-Nasser/PassGen-Releases/releases
+https://github.com/mDeploys/PassGen/releases
 
 ## System Requirements
 

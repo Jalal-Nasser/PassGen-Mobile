@@ -16,18 +16,18 @@ function TitleBar({ onResetApp, onOpenUpgrade, onCheckUpdates, onOpenTerms, isPr
     const version = '1.0.3' // Will be dynamic later
     const msg = `PassGen\nVersion ${version}\n\nA secure password generator and vault.\nDeveloper: JalalNasser\nPremium: $3.99/mo for cloud sync and unlimited items.`
     if (window.confirm(msg + '\n\nOpen downloads page?')) {
-      window.open('https://github.com/Jalal-Nasser/PassGen-Releases/releases', '_blank')
+      window.open('https://github.com/mDeploys/PassGen/releases', '_blank')
     }
     setShowMenu(false)
   }
 
   const openDownloads = () => {
-    window.open('https://github.com/Jalal-Nasser/PassGen-Releases/releases', '_blank')
+    window.open('https://github.com/mDeploys/PassGen/releases', '_blank')
     setShowMenu(false)
   }
 
   const openIssues = () => {
-    window.open('https://github.com/Jalal-Nasser/PassGen-Releases/issues', '_blank')
+    window.open('https://github.com/mDeploys/PassGen/issues', '_blank')
     setShowMenu(false)
   }
 

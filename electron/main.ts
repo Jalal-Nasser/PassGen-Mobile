@@ -634,11 +634,11 @@ function resolveIconPath() {
   }
 }
 
-const HELP_DOCS_URL = 'https://github.com/Jalal-Nasser/PassGen-Releases'
-const HELP_ISSUES_URL = 'https://github.com/Jalal-Nasser/PassGen-Releases/issues'
-const HELP_RELEASES_URL = 'https://github.com/Jalal-Nasser/PassGen/releases'
+const HELP_DOCS_URL = 'https://github.com/mDeploys/PassGen'
+const HELP_ISSUES_URL = 'https://github.com/mDeploys/PassGen/issues'
+const HELP_RELEASES_URL = 'https://github.com/mDeploys/PassGen/releases'
 const HELP_WEBSITE_URL = 'https://mdeploy.dev'
-const HELP_TERMS_URL = 'https://github.com/Jalal-Nasser/PassGen-Releases/blob/main/LICENSE.txt'
+const HELP_TERMS_URL = 'https://github.com/mDeploys/PassGen/blob/main/LICENSE.txt'
 const KEYBOARD_SHORTCUTS_DETAIL =
   'Ctrl+C - Copy password\nCtrl+L - Lock vault\nCtrl+N - New password entry\nCtrl+F - Search vault\nCtrl+Q - Quit application\nF5 - Refresh\nF11 - Toggle fullscreen'
 
@@ -1059,7 +1059,7 @@ async function checkForUpdates(silent = false) {
     const js = `(
       async () => {
         // Fetch latest release from the main PassGen repo
-        const res = await fetch('https://api.github.com/repos/Jalal-Nasser/PassGen/releases/latest');
+        const res = await fetch('https://api.github.com/repos/mDeploys/PassGen/releases/latest');
         const data = await res.json();
         return { tag: (data.tag_name||'').replace(/^v/, ''), url: data.html_url||'' }
       }
