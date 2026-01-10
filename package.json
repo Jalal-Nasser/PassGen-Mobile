@@ -15,6 +15,7 @@
     "test:vault": "tsc && electron . --vault-self-test",
     "test:oauth": "tsc && electron . --oauth-ipc-test",
     "test:auth": "tsc && electron . --auth-test",
+    "test:nowpayments": "node scripts/test-nowpayments-ipn.js",
     "gen:activation": "node scripts/generate-activation.js",
     "gen:license-keys": "node scripts/generate-license-keys.js",
     "dashboard": "node dashboard-server.js",
