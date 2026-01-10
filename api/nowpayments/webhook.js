@@ -101,7 +101,8 @@ module.exports = async (req, res) => {
       plan,
       termDays,
       installId,
-      orderId: payload.order_id || ''
+      orderId: payload.order_id || '',
+      licenseKey
     }).catch(() => {})
   }
 
@@ -342,7 +343,7 @@ async function sendLicenseEmail(email, licenseKey, plan, termDays, installId) {
   }
 }
 
-async function postDiscordNotification({ email, plan, termDays, installId, orderId }) {
+async function postDiscordNotification({ email, plan, termDays, installId, orderId, licenseKey }) {
   if (!DISCORD_WEBHOOK_URL) return
   const payload = {
     embeds: [
@@ -354,7 +355,8 @@ async function postDiscordNotification({ email, plan, termDays, installId, order
           { name: 'Plan', value: String(plan || 'cloud'), inline: true },
           { name: 'Term (days)', value: String(termDays || ''), inline: true },
           { name: 'Install ID', value: installId || '-', inline: false },
-          { name: 'Order ID', value: String(orderId || '-'), inline: false }
+          { name: 'Order ID', value: String(orderId || '-'), inline: false },
+          { name: 'License Key', value: licenseKey ? `\`${licenseKey}\`` : '-', inline: false }
         ],
         timestamp: new Date().toISOString()
       }
