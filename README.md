@@ -35,63 +35,11 @@ A secure and user-friendly desktop application for generating strong passwords a
 <img width="815" height="664" alt="image" src="https://github.com/user-attachments/assets/dbb20dd9-5371-4c81-b0e4-02a62200b47f" />
 <img width="885" height="721" alt="Screenshot 2026-01-10 103201" src="https://github.com/user-attachments/assets/cefea863-35c0-449b-bb90-f886b339b4a1" />
 
-## Activation Dashboard
-
-For developers/sellers managing premium activations:
-
-### Setup
-1. Install dependencies: `npm install`
-2. Set up Supabase database using the schema in `supabase-schema.sql`
-3. Configure environment variables in `.env`
-
-### Running the Dashboard
-```bash
-npm run dashboard
-```
-Then open http://localhost:3001 in your browser.
-
-**Note:** Make sure you have express and resend installed:
-```bash
-npm install express resend
-```
-
-### Features
-- 📊 View activation request statistics
-- 📋 Manage pending activation requests
-- ✅ Generate and send activation codes
-- 📧 Automated email notifications
-- 🔍 Track payment methods and revenue
-
-### License Keys (One-time)
-To sell pre-generated keys (for online stores), use:
-```bash
-npm run gen:license-keys -- --count 20 --plan cloud --termDays 180
-```
-- Requires `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to insert hashes into Supabase.
-- Keys are stored **hashed** only; keep the printed keys safe for distribution.
-
-### Database Schema
-The dashboard uses Supabase with the following tables:
-- `activation_requests` - Stores user activation requests
-- `dashboard_stats` - Aggregated statistics view
-
-### Security
-- 🛡️ All activation codes are cryptographically generated
-- 🔐 Uses HMAC-SHA256 with seller secret
-- 📧 Emails sent via Resend API
-- 🚫 No user data stored permanently
 ### Security
 - 🛡️ All passwords encrypted with AES-256
 - 🔑 Your master password never leaves your device
 - 🔒 Zero-knowledge architecture
 - 🚫 No telemetry or data collection
-
-## Tech Stack
-
-- **Electron** - Desktop application framework
-- **React** - UI framework
-- **TypeScript** - Type-safe development
-- **Vite** - Fast build tool
 
 ## Download
 
@@ -138,11 +86,6 @@ Instead of creating an account:
 
 👉 **[Complete Setup Guide](./SETUP_GUIDE.md)** - Step-by-step instructions for first-time users
 
-### Prerequisites
-
-- Node.js (v18 or higher)
-- npm or yarn
-
 ### Cloud Storage Setup (Optional - Premium Only)
 
 #### Google Drive
@@ -162,31 +105,6 @@ Instead of creating an account:
 1. Go to [DigitalOcean Cloud](https://cloud.digitalocean.com/)
 2. Create a Space
 3. Generate Spaces access keys from API settings
-
-### Installation
-
-1. Install dependencies:
-```bash
-npm install
-```
-
-### Development
-
-Run the app in development mode:
-```bash
-npm run electron:dev
-```
-
-This will start the Vite dev server and launch the Electron app with hot-reload enabled.
-
-### Building
-
-Build the app for production:
-```bash
-npm run electron:build
-```
-
-The built application will be available in the `release` folder.
 
 ## Updates
 - Automatic: The app periodically checks GitHub Releases and shows a notification when a newer version is available.
@@ -225,38 +143,6 @@ The built application will be available in the `release` folder.
 <img width="759" height="531" alt="image" src="https://github.com/user-attachments/assets/13d12a58-a763-4918-b6d5-fba9552e0036" />
 <img width="562" height="498" alt="image" src="https://github.com/user-attachments/assets/50e8092f-b006-4918-80f4-c1582666d8de" />
 
-
-## Project Structure
-
-```
-PassGen/
-├── electron/              # Electron main process files
-│   ├── main.ts           # Main process entry point
-│   └── preload.ts        # Preload script
-├── src/                  # React application
-│   ├── components/       # React components
-│   │   ├── SplashScreen.tsx    # Animated splash screen
-│   │   ├── Onboarding.tsx      # User onboarding wizard
-│   │   ├── StorageSetup.tsx    # Cloud storage configuration
-│   │   ├── PasswordVault.tsx   # Password management UI
-│   │   ├── UpgradeModal.tsx    # Premium upgrade flow
-│   │   └── *.css               # Component styles
-│   ├── services/         # Business logic
-│   │   ├── encryption.ts       # AES encryption service
-│   │   ├── googleDrive.ts      # Google Drive integration
-│   │   ├── s3Storage.ts        # S3/Spaces integration
-│   │   ├── storageManager.ts   # Storage orchestration
-│   │   └── configStore.ts      # Local configuration & activation
-│   ├── App.tsx           # Main App component
-│   ├── App.css           # App styles
-│   ├── main.tsx          # React entry point
-│   └── index.css         # Global styles
-├── scripts/
-│   └── generate-activation.js  # Activation code generator
-├── dist/                 # Vite build output
-├── dist-electron/        # Electron build output
-└── release/              # Packaged applications
-```
 
 ## Security Notes
 
