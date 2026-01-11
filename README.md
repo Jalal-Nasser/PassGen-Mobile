@@ -100,6 +100,11 @@ Get the latest Windows installer from the public downloads repo:
 
 https://github.com/mDeploys/PassGen/releases
 
+## User Guide
+
+See the full usage guide, including the Developer tools tab:
+https://github.com/mDeploys/PassGen/blob/main/USER_GUIDE.md
+
 ## System Requirements
 
 ### End Users (Desktop App)
