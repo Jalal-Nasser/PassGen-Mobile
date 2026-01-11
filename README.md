@@ -35,6 +35,7 @@ A secure and user-friendly desktop application for generating strong passwords a
   - Priority support
 
 <img width="815" height="664" alt="image" src="https://github.com/user-attachments/assets/dbb20dd9-5371-4c81-b0e4-02a62200b47f" />
+<img width="885" height="721" alt="Screenshot 2026-01-10 103201" src="https://github.com/user-attachments/assets/cefea863-35c0-449b-bb90-f886b339b4a1" />
 
 ## Activation Dashboard
 
@@ -271,5 +272,6 @@ PassGen/
 ## License
 
 MIT
+
 
 
