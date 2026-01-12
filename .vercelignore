@@ -1,0 +1,11 @@
+node_modules
+dist
+dist-electron
+release
+build
+*.appx
+*.appxbundle
+*.appxupload
+*.msix
+*.msixbundle
+*.msixupload
