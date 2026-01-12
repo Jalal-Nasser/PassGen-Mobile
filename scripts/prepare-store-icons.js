@@ -29,29 +29,22 @@ async function ensureStoreIcons() {
 
   for (const size of sizes) {
     const targetPath = path.join(buildDir, `icon-${size}.png`)
-    if (!fs.existsSync(targetPath)) {
-      const buffer = await sharp(srcIcon)
-        .resize(size, size, {
-          fit: 'contain',
-          background: { r: 0, g: 0, b: 0, alpha: 0 }
-        })
-        .png()
-        .toBuffer()
-      fs.writeFileSync(targetPath, buffer)
-      console.log(`Generated: ${targetPath}`)
-      buffers.push(buffer)
-    } else {
-      const buffer = await sharp(targetPath).toBuffer()
-      buffers.push(buffer)
-    }
+    const buffer = await sharp(srcIcon)
+      .resize(size, size, {
+        fit: 'contain',
+        background: { r: 0, g: 0, b: 0, alpha: 0 }
+      })
+      .png()
+      .toBuffer()
+    fs.writeFileSync(targetPath, buffer)
+    console.log(`Generated: ${targetPath}`)
+    buffers.push(buffer)
   }
 
   const icoPath = path.join(buildDir, 'icon.ico')
-  if (!fs.existsSync(icoPath)) {
-    const icoBuffer = await pngToIco(buffers)
-    fs.writeFileSync(icoPath, icoBuffer)
-    console.log(`Generated: ${icoPath}`)
-  }
+  const icoBuffer = await pngToIco(buffers)
+  fs.writeFileSync(icoPath, icoBuffer)
+  console.log(`Generated: ${icoPath}`)
 }
 
 ensureStoreIcons().catch((error) => {

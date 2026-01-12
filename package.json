@@ -1,6 +1,6 @@
 {
   "name": "passgen",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "A Vault secure password generator desktop application",
   "engines": {
     "node": ">=20.0.0"
