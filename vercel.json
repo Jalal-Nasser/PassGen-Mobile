@@ -1,5 +1,7 @@
 {
   "rewrites": [
+    { "source": "/privacy", "destination": "/api/privacy" },
+    { "source": "/privacy/", "destination": "/api/privacy" },
     { "source": "/desktop/login", "destination": "/api/desktop/login" },
     { "source": "/auth/:path*", "destination": "/api/auth?path=:path*" },
     { "source": "/api/auth/:path*", "destination": "/api/auth?path=:path*" }
