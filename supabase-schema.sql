@@ -48,7 +48,8 @@ CREATE POLICY "Allow all operations on activation_requests" ON activation_reques
     FOR ALL USING (true);
 
 -- Create a view for dashboard statistics
-CREATE OR REPLACE VIEW dashboard_stats AS
+CREATE OR REPLACE VIEW dashboard_stats
+WITH (security_invoker = true) AS
 SELECT
   COUNT(*) as total_requests,
   COUNT(*) FILTER (WHERE status = 'pending') as pending_requests,
