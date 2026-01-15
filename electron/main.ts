@@ -579,10 +579,23 @@ async function loadPasskeyVaultKey(installId: string): Promise<Buffer> {
   const keytar = getKeytarModule()
   if (keytar) {
     const stored = await keytar.getPassword(PASSKEY_SERVICE, installId)
-    if (!stored) {
-      throw new Error('Passkey unlock is not enabled on this device')
+    if (stored) {
+      return Buffer.from(stored, 'base64')
     }
-    return Buffer.from(stored, 'base64')
+    const credentials = await keytar.findCredentials(PASSKEY_SERVICE)
+    if (credentials && credentials.length > 0) {
+      const fallback = credentials[0]
+      if (fallback?.password) {
+        await keytar.setPassword(PASSKEY_SERVICE, installId, fallback.password)
+        if (fallback.account && fallback.account !== installId) {
+          try {
+            await keytar.deletePassword(PASSKEY_SERVICE, fallback.account)
+          } catch {}
+        }
+        return Buffer.from(fallback.password, 'base64')
+      }
+    }
+    throw new Error('Passkey unlock is not enabled on this device')
   }
   if (!safeStorage.isEncryptionAvailable()) {
     throw new Error('Secure storage is unavailable. Install keytar to enable passkey unlock.')
@@ -599,11 +612,20 @@ async function loadPasskeyVaultKey(installId: string): Promise<Buffer> {
   } catch {
     throw new Error('Passkey unlock is not enabled on this device')
   }
-  if (!parsed.key || parsed.installId !== installId) {
+  if (!parsed.key) {
     throw new Error('Passkey unlock is not enabled on this device')
   }
   const encrypted = Buffer.from(parsed.key, 'base64')
   const decrypted = safeStorage.decryptString(encrypted)
+  if (parsed.installId !== installId) {
+    const payload = JSON.stringify({
+      installId,
+      key: parsed.key
+    })
+    try {
+      await fs.promises.writeFile(PASSKEY_KEY_FILE, payload, 'utf8')
+    } catch {}
+  }
   return Buffer.from(decrypted, 'base64')
 }
 
