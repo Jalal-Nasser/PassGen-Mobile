@@ -28,18 +28,43 @@ async function ensureStoreIcons() {
     fs.mkdirSync(appxDir, { recursive: true })
   }
 
+  const transparentKeyThreshold = 8
+  const renderIconBuffer = async (width, height) => {
+    const { data, info } = await sharp(srcIcon)
+      .resize(width, height, {
+        fit: 'contain',
+        background: { r: 0, g: 0, b: 0, alpha: 0 }
+      })
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true })
+
+    for (let i = 0; i < data.length; i += info.channels) {
+      const r = data[i]
+      const g = data[i + 1]
+      const b = data[i + 2]
+      if (r <= transparentKeyThreshold && g <= transparentKeyThreshold && b <= transparentKeyThreshold) {
+        data[i + 3] = 0
+      }
+    }
+
+    return sharp(data, {
+      raw: {
+        width: info.width,
+        height: info.height,
+        channels: info.channels
+      }
+    })
+      .png()
+      .toBuffer()
+  }
+
   const sizes = [256, 512]
   const buffers = []
 
   for (const size of sizes) {
     const targetPath = path.join(buildDir, `icon-${size}.png`)
-    const buffer = await sharp(srcIcon)
-      .resize(size, size, {
-        fit: 'contain',
-        background: { r: 0, g: 0, b: 0, alpha: 0 }
-      })
-      .png()
-      .toBuffer()
+    const buffer = await renderIconBuffer(size, size)
     fs.writeFileSync(targetPath, buffer)
     console.log(`Generated: ${targetPath}`)
     buffers.push(buffer)
@@ -60,13 +85,7 @@ async function ensureStoreIcons() {
 
   for (const asset of appxAssets) {
     const targetPath = path.join(appxDir, asset.name)
-    const buffer = await sharp(srcIcon)
-      .resize(asset.width, asset.height, {
-        fit: 'contain',
-        background: { r: 0, g: 0, b: 0, alpha: 0 }
-      })
-      .png()
-      .toBuffer()
+    const buffer = await renderIconBuffer(asset.width, asset.height)
     fs.writeFileSync(targetPath, buffer)
     console.log(`Generated: ${targetPath}`)
   }
