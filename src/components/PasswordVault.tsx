@@ -155,7 +155,9 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
     try {
       setIsSearchingCloud(true)
       setCloudVersions([])
+      console.log('[UI] Requesting cloud versions for provider:', providerId)
       const versions = await api.vaultListCloudVersions(providerId)
+      console.log('[UI] Received cloud versions:', versions)
       setCloudVersions(versions || [])
       if (versions?.length > 0) {
         setSelectedVersionId(versions[0].id)
@@ -746,7 +748,7 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
                   type="radio"
                   name="cloud-import-provider"
                   checked={cloudImportProvider === 'google-drive'}
-                  onChange={() => setCloudImportProvider('google-drive')}
+                  onChange={() => handleProviderChange('google-drive')}
                 />
                 <img src="/google-drive.png" alt="Google Drive" />
                 <div className="cloud-import-meta">
@@ -763,7 +765,7 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
                   type="radio"
                   name="cloud-import-provider"
                   checked={cloudImportProvider === 's3-compatible'}
-                  onChange={() => setCloudImportProvider('s3-compatible')}
+                  onChange={() => handleProviderChange('s3-compatible')}
                 />
                 <img src="/aws-s3.svg" alt="S3-Compatible" />
                 <div className="cloud-import-meta">
@@ -778,7 +780,7 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
                   type="radio"
                   name="cloud-import-provider"
                   checked={cloudImportProvider === 'supabase'}
-                  onChange={() => setCloudImportProvider('supabase')}
+                  onChange={() => handleProviderChange('supabase')}
                 />
                 <img src="/supabase.svg" alt="Supabase" />
                 <div className="cloud-import-meta">
