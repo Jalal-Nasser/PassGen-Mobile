@@ -45,9 +45,7 @@ A secure and user-friendly desktop application for generating strong passwords a
 
 Get PassGen Secrets Vault from the Microsoft Store:
 
-<a href="https://apps.microsoft.com/store/detail/9n5c328ctl7d">
-  <img src="https://get.microsoft.com/images/en-us%20dark.svg" alt="Get it from Microsoft" width="200">
-</a>
+[![Get it from Microsoft](https://get.microsoft.com/images/en-us%20light.svg)](https://apps.microsoft.com/store/detail/9n5c328ctl7d)
 
 ## User Guide
 
