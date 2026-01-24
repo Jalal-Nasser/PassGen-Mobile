@@ -10,7 +10,7 @@
     "dev": "vite",
     "build": "node scripts/write-build-info.js && tsc && vite build && node scripts/sync-icons.js && electron-builder",
     "preview": "vite preview",
-    "electron:dev": "tsc && concurrently \"vite --port 5173 --strictPort\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:dev": "tsc && vite --port 5173 --strictPort",
     "electron:build": "node scripts/write-build-info.js && tsc && vite build && node scripts/sync-icons.js && electron-builder",
     "prebuild:msix": "node scripts/write-build-info.js && tsc && vite build && node scripts/sync-icons.js && node scripts/prepare-store-icons.js",
     "build:msix": "cross-env STORE_BUILD=1 electron-builder --win appx",

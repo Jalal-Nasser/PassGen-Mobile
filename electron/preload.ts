@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   vaultImportEncrypted: (data: string) => ipcRenderer.invoke('vault:importEncrypted', data),
   vaultImportLegacy: (entries: Array<{ filename: string; data: string }>, masterPassword: string) => ipcRenderer.invoke('vault:importLegacy', entries, masterPassword),
   vaultImportFromCloud: (providerId: string, versionId?: string) => ipcRenderer.invoke('vault:importFromCloud', providerId, versionId),
+  vaultListCloudVersions: (providerId: string) => ipcRenderer.invoke('vault:listCloudVersions', providerId),
   vaultRepair: () => ipcRenderer.invoke('vault:repair'),
   storageConfigure: (config: any) => ipcRenderer.invoke('storage:configure', config),
   storageProviderStatus: () => ipcRenderer.invoke('storage:providerStatus'),
@@ -114,6 +115,7 @@ declare global {
       vaultImportEncrypted: (data: string) => Promise<void>
       vaultImportLegacy: (entries: Array<{ filename: string; data: string }>, masterPassword: string) => Promise<{ imported: number; skipped: number }>
       vaultImportFromCloud: (providerId: string, versionId?: string) => Promise<{ ok: boolean }>
+      vaultListCloudVersions: (providerId: string) => Promise<any[]>
       vaultRepair: () => Promise<{ total: number; kept: number; migrated: number; removed: number }>
       storageConfigure: (config: any) => Promise<void>
       storageProviderStatus: () => Promise<any>

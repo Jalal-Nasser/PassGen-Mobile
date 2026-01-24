@@ -61,13 +61,24 @@ export class GoogleDriveProvider implements StorageProvider {
   }
 
   private async listVaultFiles(): Promise<any[]> {
-    const response = await this.drive.files.list({
-      q: "name contains 'passgen-vault-' and appProperties has { key='passgenVault' and value='1' }",
-      fields: 'files(id, name, createdTime, modifiedTime, appProperties)',
-      spaces: 'drive',
-      orderBy: 'modifiedTime desc'
-    })
-    return response.data.files || []
+    console.log('[DRIVE-DEBUG] Searching for vault files in space: drive')
+    try {
+      const response = await this.drive.files.list({
+        q: "name contains 'passgen' and trashed = false",
+        fields: 'files(id, name, createdTime, modifiedTime, appProperties, size)',
+        spaces: 'drive',
+        orderBy: 'modifiedTime desc'
+      })
+      const files = response.data.files || []
+      console.log(`[DRIVE-DEBUG] Found ${files.length} files matching query`)
+      files.forEach((f: any) => {
+        console.log(`[DRIVE-DEBUG] file: ${f.name} (id: ${f.id})`)
+      })
+      return files
+    } catch (error) {
+      console.error('[DRIVE-DEBUG] Error listing files:', error)
+      throw error
+    }
   }
 
   async upload(data: Buffer, meta: VaultUploadMeta): Promise<ProviderUploadResult> {

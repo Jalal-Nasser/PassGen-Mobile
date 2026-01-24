@@ -1678,6 +1678,10 @@ ipcMain.handle('vault:importFromCloud', async (_event, providerId: string, versi
   return { ok: true }
 })
 
+ipcMain.handle('vault:listCloudVersions', async (_event, providerId: string) => {
+  return vaultRepository.listCloudVersions(providerId as any)
+})
+
 ipcMain.handle('vault:repair', async () => {
   return vaultRepository.repairVault()
 })

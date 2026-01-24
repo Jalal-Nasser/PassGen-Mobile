@@ -430,9 +430,22 @@ export class VaultRepository {
       this.vaultPayload = payload
       this.vaultHeader = parsed.header
       await this.writeLocalVault(parsed)
-    } finally {
       this.syncedFromCloud = true
+    } finally {
+      // Do not set syncedFromCloud = true in finally, 
+      // only if we actually downloaded and decrypted successfully.
     }
+  }
+
+  async listCloudVersions(providerId: ProviderId): Promise<ProviderVersion[]> {
+    console.log(`[VAULT] Listing cloud versions for provider: ${providerId}`)
+    await this.ensureUnlocked()
+    const provider = await this.getProviderById(providerId)
+    if (!provider) {
+      console.warn(`[VAULT] No provider found for id: ${providerId}`)
+      return []
+    }
+    return provider.listVersions()
   }
 
   async importFromCloud(providerId: ProviderId, versionId?: string): Promise<void> {
@@ -554,6 +567,12 @@ export class VaultRepository {
     this.vaultHeader = file.header
 
     await this.writeLocalVault(file)
+    
+    // Safety: don't overwrite cloud if we haven't synced yet (prevent overwriting with empty vault)
+    if (!this.syncedFromCloud) {
+       console.log('[VAULT] Skipping cloud upload because syncedFromCloud is false')
+       return
+    }
 
     const provider = await this.getActiveProvider()
     if (provider && provider.id !== 'local') {
@@ -685,6 +704,7 @@ export class VaultRepository {
       access_type: 'offline',
       scope: [
         'https://www.googleapis.com/auth/drive.file',
+        'https://www.googleapis.com/auth/drive.readonly',
         'https://www.googleapis.com/auth/userinfo.email',
         'openid'
       ],
@@ -698,7 +718,7 @@ export class VaultRepository {
     const safeAuthUrl = (() => {
       try {
         const url = new URL(authUrl)
-        const redactKeys = new Set(['client_secret', 'access_token', 'refresh_token', 'id_token', 'code', 'token'])
+        const redactKeys = ['client_secret', 'access_token', 'refresh_token', 'id_token', 'code', 'token']
         for (const key of redactKeys) {
           if (url.searchParams.has(key)) {
             url.searchParams.set(key, 'REDACTED')

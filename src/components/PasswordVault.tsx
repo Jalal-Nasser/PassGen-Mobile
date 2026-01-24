@@ -37,6 +37,9 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
   const [cloudImportProvider, setCloudImportProvider] = useState<ProviderId>('google-drive')
   const [cloudImportBusy, setCloudImportBusy] = useState(false)
   const [cloudImportError, setCloudImportError] = useState<string | null>(null)
+  const [cloudVersions, setCloudVersions] = useState<any[]>([])
+  const [isSearchingCloud, setIsSearchingCloud] = useState(false)
+  const [selectedVersionId, setSelectedVersionId] = useState<string>('')
   const [cloudConfigStatus, setCloudConfigStatus] = useState({
     googleDrive: { connected: false, email: '' },
     oneDrive: { connected: false, email: '' },
@@ -46,31 +49,31 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
 
   useEffect(() => {
     loadEntries()
-    ;(async () => {
-      try {
-        const label = await storageManager.refreshProviderStatus()
-        setProviderLabel(label)
-      } catch {}
-    })()
-    // Expose helpers for main process bridge
-    ;(window as any).__passgen_listEntries = async () => {
-      try { return await storageManager.getAllPasswordEntries() } catch { return [] }
-    }
-    ;(window as any).__passgen_getEntryById = async (id: string) => {
-      try {
-        const all = await storageManager.getAllPasswordEntries()
-        const e = all.find(x => x.id === id)
-        if (!e) return null
-        return { username: e.username, password: e.password }
-      } catch { return null }
-    }
-    // Fetch session token for extension pairing
-    ;(async () => {
-      try {
-        const token = await (window as any).electronAPI?.getSessionToken?.()
-        if (typeof token === 'string') setSessionToken(token)
-      } catch {}
-    })()
+      ; (async () => {
+        try {
+          const label = await storageManager.refreshProviderStatus()
+          setProviderLabel(label)
+        } catch { }
+      })()
+      // Expose helpers for main process bridge
+      ; (window as any).__passgen_listEntries = async () => {
+        try { return await storageManager.getAllPasswordEntries() } catch { return [] }
+      }
+      ; (window as any).__passgen_getEntryById = async (id: string) => {
+        try {
+          const all = await storageManager.getAllPasswordEntries()
+          const e = all.find(x => x.id === id)
+          if (!e) return null
+          return { username: e.username, password: e.password }
+        } catch { return null }
+      }
+      // Fetch session token for extension pairing
+      ; (async () => {
+        try {
+          const token = await (window as any).electronAPI?.getSessionToken?.()
+          if (typeof token === 'string') setSessionToken(token)
+        } catch { }
+      })()
     // Close dropdown when clicking outside
     const handleClickOutside = (e: MouseEvent) => {
       const target = e.target as HTMLElement
@@ -107,41 +110,70 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
     if (!api?.storageProviderStatus) return
 
     setCloudImportError(null)
-    ;(async () => {
-      try {
-        const status = await api.storageProviderStatus()
-        const googleConnected = !!status?.googleDrive?.connected
-        const googleEmail = status?.googleDrive?.email || ''
-        const s3Configured = !!status?.s3Compatible?.configured
-        const supabaseConfigured = !!status?.supabase?.configured
-        const oneDriveConnected = !!status?.oneDrive?.connected
-        const oneDriveEmail = status?.oneDrive?.email || ''
-        setCloudConfigStatus({
-          googleDrive: { connected: googleConnected, email: googleEmail },
-          oneDrive: { connected: oneDriveConnected, email: oneDriveEmail },
-          s3Compatible: s3Configured,
-          supabase: supabaseConfigured
-        })
+      ; (async () => {
+        try {
+          const status = await api.storageProviderStatus()
+          const googleConnected = !!status?.googleDrive?.connected
+          const googleEmail = status?.googleDrive?.email || ''
+          const s3Configured = !!status?.s3Compatible?.configured
+          const supabaseConfigured = !!status?.supabase?.configured
+          const oneDriveConnected = !!status?.oneDrive?.connected
+          const oneDriveEmail = status?.oneDrive?.email || ''
+          setCloudConfigStatus({
+            googleDrive: { connected: googleConnected, email: googleEmail },
+            oneDrive: { connected: oneDriveConnected, email: oneDriveEmail },
+            s3Compatible: s3Configured,
+            supabase: supabaseConfigured
+          })
 
-        const active = status?.activeProviderId as ProviderId | undefined
-        if (active && active !== 'local' && active !== 'dropbox') {
-          setCloudImportProvider(active)
-          return
+          const active = status?.activeProviderId as ProviderId | undefined
+          if (active && active !== 'local' && active !== 'dropbox') {
+            setCloudImportProvider(active)
+            return
+          }
+
+          const preferred: ProviderId | null =
+            (googleConnected ? 'google-drive' : null) ||
+            (oneDriveConnected ? 'onedrive' : null) ||
+            (s3Configured ? 's3-compatible' : null) ||
+            (supabaseConfigured ? 'supabase' : null) ||
+            null
+          if (preferred) {
+            setCloudImportProvider(preferred)
+            loadCloudVersions(preferred)
+          }
+        } catch (error) {
+          console.warn('Failed to load provider status', error)
+          setCloudImportError(t('Connection failed: {{message}}', { message: (error as Error).message }))
         }
-
-        const preferred: ProviderId | null =
-          (googleConnected ? 'google-drive' : null) ||
-          (oneDriveConnected ? 'onedrive' : null) ||
-          (s3Configured ? 's3-compatible' : null) ||
-          (supabaseConfigured ? 'supabase' : null) ||
-          null
-        if (preferred) setCloudImportProvider(preferred)
-      } catch (error) {
-        console.warn('Failed to load provider status', error)
-        setCloudImportError(t('Connection failed: {{message}}', { message: (error as Error).message }))
-      }
-    })()
+      })()
   }, [showCloudImport, t])
+
+  const loadCloudVersions = async (providerId: ProviderId) => {
+    const api = (window as any).electronAPI
+    if (!api?.vaultListCloudVersions) return
+    try {
+      setIsSearchingCloud(true)
+      setCloudVersions([])
+      const versions = await api.vaultListCloudVersions(providerId)
+      setCloudVersions(versions || [])
+      if (versions?.length > 0) {
+        setSelectedVersionId(versions[0].id)
+      } else {
+        setSelectedVersionId('')
+      }
+    } catch (err) {
+      console.warn('Failed to list cloud versions:', err)
+    } finally {
+      setIsSearchingCloud(false)
+    }
+  }
+
+  const handleProviderChange = (providerId: ProviderId) => {
+    setCloudImportProvider(providerId)
+    setCloudImportError(null)
+    loadCloudVersions(providerId)
+  }
 
   const loadEntries = async () => {
     try {
@@ -160,11 +192,11 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
 
   useEffect(() => {
     if (!copyMessage) return
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       setCopyMessage('')
       setCopyMessageType('')
     }, 1800)
-    return () => clearTimeout(t)
+    return () => clearTimeout(timer)
   }, [copyMessage])
 
   const repairVault = async () => {
@@ -323,7 +355,7 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
     try {
       setCloudImportBusy(true)
       setCloudImportError(null)
-      await api.vaultImportFromCloud(cloudImportProvider)
+      await api.vaultImportFromCloud(cloudImportProvider, selectedVersionId)
       await loadEntries()
       setShowCloudImport(false)
       alert(t('Cloud import complete.'))
@@ -589,7 +621,7 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
 
       <div className="entries-list">
         {loading && <div className="loading">{t('Loading...')}</div>}
-        
+
         {!loading && filteredEntries.length === 0 && (
           <div className="empty-state">
             <p>{t('No passwords stored yet.')}</p>
@@ -600,78 +632,79 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
         {!loading && filteredEntries.map(entry => {
           const isExpanded = expandedEntries.has(entry.id)
           return (
-          <div key={entry.id} className={`password-entry ${isExpanded ? 'expanded' : 'collapsed'}`}>
-            <div className="entry-header" onClick={() => toggleEntry(entry.id)}>
-              <button className="btn-expand" title={isExpanded ? t('Collapse') : t('Expand')}>
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
-                  <path d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z"/>
-                </svg>
-              </button>
-              <div className="entry-title">
-                <h3>{entry.name}</h3>
-                {entry.url && (
-                  <a href={entry.url} target="_blank" rel="noopener noreferrer" className="entry-url ltr-input" title={entry.url} onClick={(e) => e.stopPropagation()}>
-                    {(() => {
-                      try {
-                        return new URL(entry.url!).hostname.replace('www.', '')
-                      } catch {
-                        return entry.url
-                      }
-                    })()}
-                  </a>
+            <div key={entry.id} className={`password-entry ${isExpanded ? 'expanded' : 'collapsed'}`}>
+              <div className="entry-header" onClick={() => toggleEntry(entry.id)}>
+                <button className="btn-expand" title={isExpanded ? t('Collapse') : t('Expand')}>
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
+                    <path d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z" />
+                  </svg>
+                </button>
+                <div className="entry-title">
+                  <h3>{entry.name}</h3>
+                  {entry.url && (
+                    <a href={entry.url} target="_blank" rel="noopener noreferrer" className="entry-url ltr-input" title={entry.url} onClick={(e) => e.stopPropagation()}>
+                      {(() => {
+                        try {
+                          return new URL(entry.url!).hostname.replace('www.', '')
+                        } catch {
+                          return entry.url
+                        }
+                      })()}
+                    </a>
                   )}
                 </div>
-              <button onClick={(e) => { e.stopPropagation(); handleEditEntry(entry); }} className="btn-icon" title={t('Edit')}>
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/>
-                </svg>
-              </button>
-            </div>
-
-            {isExpanded && <div className="entry-fields">
-              {entry.username && (
-                <div className="field-row">
-                  <div className="field-content">
-                    <span className="field-label">{t('Username')}</span>
-                    <span className="field-text ltr-input">{entry.username}</span>
-                  </div>
-                  <button onClick={() => copyToClipboard(entry.username!)} className="btn-copy" title={t('Copy username')}>
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/>
-                      <path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/>
-                    </svg>
-                  </button>
-                </div>
-              )}
-
-              <div className="field-row">
-                <div className="field-content">
-                  <span className="field-label">{t('Password')}</span>
-                  <span className="field-text password-hidden">••••••••</span>
-                </div>
-                <button onClick={() => copyToClipboard(entry.password)} className="btn-copy" title={t('Copy password')}>
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/>
-                    <path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/>
+                <button onClick={(e) => { e.stopPropagation(); handleEditEntry(entry); }} className="btn-icon" title={t('Edit')}>
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z" />
                   </svg>
                 </button>
               </div>
 
-              {entry.notes && (
-                <div className="field-row notes-row">
-                  <div className="field-content">
-                    <span className="field-label">{t('Notes')}</span>
-                    <span className="field-text notes-text">{entry.notes}</span>
+              {isExpanded && <div className="entry-fields">
+                {entry.username && (
+                  <div className="field-row">
+                    <div className="field-content">
+                      <span className="field-label">{t('Username')}</span>
+                      <span className="field-text ltr-input">{entry.username}</span>
+                    </div>
+                    <button onClick={() => copyToClipboard(entry.username!)} className="btn-copy" title={t('Copy username')}>
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z" />
+                        <path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z" />
+                      </svg>
+                    </button>
                   </div>
-                </div>
-              )}
-            </div>}
+                )}
 
-            {isExpanded && <div className="entry-footer">
-              <span className="entry-date">{t('Added {{date}}', { date: new Date(entry.createdAt).toLocaleDateString(language) })}</span>
-            </div>}
-          </div>
-        )}
+                <div className="field-row">
+                  <div className="field-content">
+                    <span className="field-label">{t('Password')}</span>
+                    <span className="field-text password-hidden">••••••••</span>
+                  </div>
+                  <button onClick={() => copyToClipboard(entry.password)} className="btn-copy" title={t('Copy password')}>
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z" />
+                      <path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z" />
+                    </svg>
+                  </button>
+                </div>
+
+                {entry.notes && (
+                  <div className="field-row notes-row">
+                    <div className="field-content">
+                      <span className="field-label">{t('Notes')}</span>
+                      <span className="field-text notes-text">{entry.notes}</span>
+                    </div>
+                  </div>
+                )}
+              </div>}
+
+              {isExpanded && <div className="entry-footer">
+                <span className="entry-date">{t('Added {{date}}', { date: new Date(entry.createdAt).toLocaleDateString(language) })}</span>
+              </div>}
+            </div>
+          )
+        }
         )}
       </div>
 
@@ -685,10 +718,10 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
             <span className="footer-label">{t('Extension Token')}</span>
             <div className="token-container">
               <input type="text" readOnly value={sessionToken} className="token-input ltr-input" />
-              <button className="btn-copy-small" onClick={async ()=>{ const ok = await copyText(sessionToken); if (!ok) alert(t('Failed to copy token')); }} title={t('Copy session token')}>
+              <button className="btn-copy-small" onClick={async () => { const ok = await copyText(sessionToken); if (!ok) alert(t('Failed to copy token')); }} title={t('Copy session token')}>
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/>
-                  <path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/>
+                  <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z" />
+                  <path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z" />
                 </svg>
               </button>
             </div>
@@ -696,7 +729,7 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
         )}
         <div className="footer-encryption">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" style={{ marginInlineEnd: '6px' }}>
-            <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/>
+            <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z" />
           </svg>
           {t('All passwords are encrypted with your master password')}
         </div>
@@ -760,7 +793,7 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
                   type="radio"
                   name="cloud-import-provider"
                   checked={cloudImportProvider === 'onedrive'}
-                  onChange={() => setCloudImportProvider('onedrive')}
+                  onChange={() => handleProviderChange('onedrive')}
                 />
                 <img src="/onedrive.svg" alt="OneDrive" />
                 <div className="cloud-import-meta">
@@ -773,13 +806,37 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
                 </div>
               </label>
             </div>
+
+            <div className="cloud-version-selector">
+              {isSearchingCloud ? (
+                <div className="version-status searching">{t('Scanning for backups...')}</div>
+              ) : cloudVersions.length > 0 ? (
+                <>
+                  <label className="version-label">{t('Available Backups')}</label>
+                  <select
+                    className="version-select"
+                    value={selectedVersionId}
+                    onChange={(e) => setSelectedVersionId(e.target.value)}
+                  >
+                    {cloudVersions.map(v => (
+                      <option key={v.id} value={v.id}>
+                        {new Date(v.createdAt).toLocaleString(language)} {v.name ? `(${v.name})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              ) : (
+                <div className="version-status none">{t('No backups found for this account.')}</div>
+              )}
+            </div>
+
             {cloudImportError && <div className="cloud-import-error">{cloudImportError}</div>}
             <div className="cloud-import-actions">
               <button className="btn-secondary" onClick={() => setShowCloudImport(false)} disabled={cloudImportBusy}>
                 {t('Cancel')}
               </button>
-              <button className="btn-primary" onClick={handleCloudImport} disabled={cloudImportBusy}>
-                {cloudImportBusy ? t('Importing...') : t('Import Latest')}
+              <button className="btn-primary" onClick={handleCloudImport} disabled={cloudImportBusy || isSearchingCloud || cloudVersions.length === 0}>
+                {cloudImportBusy ? t('Importing...') : t('Restore Selected')}
               </button>
             </div>
           </div>
