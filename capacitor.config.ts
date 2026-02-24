@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.passgen.app',
+  appId: 'com.mdeploy.passgen',
   appName: 'PassGen Vault',
   webDir: 'dist'
 };
