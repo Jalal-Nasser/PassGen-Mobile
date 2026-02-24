@@ -21,7 +21,8 @@
     "gen:activation": "node scripts/generate-activation.js",
     "gen:license-keys": "node scripts/generate-license-keys.js",
     "dashboard": "node dashboard-server.js",
-    "discord-bot": "node discord-bot.js"
+    "discord-bot": "node discord-bot.js",
+    "build:web": "tsc && vite build"
   },
   "keywords": [
     "password",
@@ -32,6 +33,7 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@capacitor/cli": "^8.1.0",
     "@types/crypto-js": "^4.2.2",
     "@types/node": "^20.10.0",
     "@types/react": "^18.2.43",
@@ -41,17 +43,19 @@
     "cross-env": "^7.0.3",
     "electron": "^28.0.0",
     "electron-builder": "^24.9.1",
+    "png-to-ico": "^2.1.0",
+    "sharp": "^0.33.2",
     "typescript": "^5.3.3",
     "vite": "^5.0.8",
     "vite-plugin-electron": "^0.28.0",
     "vite-plugin-electron-renderer": "^0.14.5",
-    "png-to-ico": "^2.1.0",
-    "sharp": "^0.33.2",
     "wait-on": "^7.2.0"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.925.0",
     "@auth/core": "^0.34.3",
+    "@aws-sdk/client-s3": "^3.925.0",
+    "@capacitor/core": "^8.1.0",
+    "@capacitor/ios": "^8.1.0",
     "@peculiar/x509": "^1.14.2",
     "@supabase/supabase-js": "^2.89.0",
     "axios": "^1.13.2",
