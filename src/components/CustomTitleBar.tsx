@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { Capacitor } from '@capacitor/core'
 import './CustomTitleBar.css'
 import { useI18n } from '../services/i18n'
 
@@ -32,7 +33,7 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({ title = 'PassGen
 
   const sendHelpAction = (channel: string) => {
     closeMenus()
-    ;(window as any).electronAPI?.emit?.(channel)
+      ; (window as any).electronAPI?.emit?.(channel)
   }
 
   return (
@@ -40,8 +41,8 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({ title = 'PassGen
       <div className="title-bar-left">
         <div className="app-icon">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-            <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z" fill="currentColor"/>
-            <path d="M10 17l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z" fill="white"/>
+            <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z" fill="currentColor" />
+            <path d="M10 17l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z" fill="white" />
           </svg>
         </div>
         <span className="app-title">{title}</span>
@@ -153,23 +154,25 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({ title = 'PassGen
         </div>
       </div>
 
-      <div className="title-bar-right">
-        <button className="title-bar-button minimize-btn" onClick={handleMinimize} title={t('Minimize')}>
-          <svg width="12" height="12" viewBox="0 0 12 12">
-            <path d="M0 6h12" stroke="currentColor" strokeWidth="1"/>
-          </svg>
-        </button>
-        <button className="title-bar-button maximize-btn" onClick={handleMaximize} title={t('Maximize')}>
-          <svg width="12" height="12" viewBox="0 0 12 12">
-            <rect x="1" y="1" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1"/>
-          </svg>
-        </button>
-        <button className="title-bar-button close-btn" onClick={handleClose} title={t('Close')}>
-          <svg width="12" height="12" viewBox="0 0 12 12">
-            <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1"/>
-          </svg>
-        </button>
-      </div>
+      {!Capacitor.isNativePlatform() && (
+        <div className="title-bar-right">
+          <button className="title-bar-button minimize-btn" onClick={handleMinimize} title={t('Minimize')}>
+            <svg width="12" height="12" viewBox="0 0 12 12">
+              <path d="M0 6h12" stroke="currentColor" strokeWidth="1" />
+            </svg>
+          </button>
+          <button className="title-bar-button maximize-btn" onClick={handleMaximize} title={t('Maximize')}>
+            <svg width="12" height="12" viewBox="0 0 12 12">
+              <rect x="1" y="1" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1" />
+            </svg>
+          </button>
+          <button className="title-bar-button close-btn" onClick={handleClose} title={t('Close')}>
+            <svg width="12" height="12" viewBox="0 0 12 12">
+              <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1" />
+            </svg>
+          </button>
+        </div>
+      )}
     </div>
   )
 }

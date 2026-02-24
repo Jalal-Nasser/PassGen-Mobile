@@ -5,6 +5,11 @@ import type { ProviderId } from '../services/storageTypes'
 import './PasswordVault.css'
 import { copyText } from '../services/clipboard'
 import { getEntryLimit, getPremiumTier, isProviderAllowed } from '../services/license'
+import { checkPasswordCompromised } from '../services/pwnedChecker'
+import { parseImportCSV } from '../services/csvImport'
+import { initializeAuth, signOut, getCurrentSession } from '../services/auth'
+import { supabase } from '../services/supabase'
+import AuthModal from './AuthModal'
 import { useI18n } from '../services/i18n'
 
 interface PasswordVaultProps {
@@ -37,6 +42,12 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
   const [cloudImportProvider, setCloudImportProvider] = useState<ProviderId>('google-drive')
   const [cloudImportBusy, setCloudImportBusy] = useState(false)
   const [cloudImportError, setCloudImportError] = useState<string | null>(null)
+  const [auditRunning, setAuditRunning] = useState(false)
+  const [compromisedEntries, setCompromisedEntries] = useState<Record<string, number>>({})
+
+  // Auth State
+  const [session, setSession] = useState<any>(null)
+  const [showAuthModal, setShowAuthModal] = useState(false)
 
   // Cloud recovery state
   const [isKeyMismatch, setIsKeyMismatch] = useState(false)
@@ -51,6 +62,15 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
     s3Compatible: false,
     supabase: false
   })
+
+  useEffect(() => {
+    initializeAuth()
+    getCurrentSession().then(s => setSession(s))
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+    })
+    return () => authListener.subscription.unsubscribe()
+  }, [])
 
   useEffect(() => {
     loadEntries()
@@ -311,6 +331,52 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
     }
   }
 
+  const handleImportCSV = () => {
+    const limit = getEntryLimit(premiumTier)
+    const available = limit === null ? Infinity : Math.max(0, limit - entries.length)
+    if (available <= 0) {
+      alert(t('You have reached the free tier limit of 4 passwords. Please upgrade to Premium to import more.'))
+      window.dispatchEvent(new Event('open-upgrade'))
+      return
+    }
+
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.csv'
+    input.onchange = async (e: any) => {
+      const file = e.target?.files?.[0]
+      if (!file) return
+      try {
+        setLoading(true)
+        const text = await file.text()
+        const parsedEntries = parseImportCSV(text)
+        if (parsedEntries.length === 0) {
+          alert(t('No valid passwords found in CSV.'))
+          return
+        }
+
+        const toImport = parsedEntries.slice(0, available)
+        let count = 0
+        for (const entry of toImport) {
+          await storageManager.savePasswordEntry(entry)
+          count++
+        }
+
+        await loadEntries()
+        alert(t('Successfully imported {{count}} passwords from CSV.', { count }))
+        if (parsedEntries.length > available) {
+          alert(t('Only {{count}} passwords were imported due to free tier limits.', { count: available }))
+          window.dispatchEvent(new Event('open-upgrade'))
+        }
+      } catch (err) {
+        alert(t('Import CSV failed: {{message}}', { message: (err as Error).message }))
+      } finally {
+        setLoading(false)
+      }
+    }
+    input.click()
+  }
+
   const getUpgradeMessage = (providerId: ProviderId) => {
     if (providerId === 'google-drive') return t('Upgrade to Cloud or BYOS to enable Google Drive.')
     if (providerId === 'onedrive') return t('Upgrade to Cloud or BYOS to enable OneDrive.')
@@ -464,6 +530,30 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
     }
   }
 
+  const handleAuditPasswords = async () => {
+    setAuditRunning(true)
+    try {
+      const results: Record<string, number> = {}
+      for (const entry of entries) {
+        const count = await checkPasswordCompromised(entry.password)
+        if (count > 0) {
+          results[entry.id] = count
+        }
+      }
+      setCompromisedEntries(results)
+      if (Object.keys(results).length === 0) {
+        alert(t('Great news! None of your passwords were found in known data breaches.'))
+      } else {
+        alert(t('Audit complete. We found {{count}} compromised passwords. Please update them immediately.', { count: Object.keys(results).length }))
+      }
+    } catch (err) {
+      console.error(err)
+      alert(t('Audit failed: {{message}}', { message: (err as Error).message }))
+    } finally {
+      setAuditRunning(false)
+    }
+  }
+
   const copyToClipboard = async (text: string) => {
     try {
       const ok = await copyText(text)
@@ -515,6 +605,15 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
           <h2>{t('Password Vault')} {premiumTier !== 'free' && <span className="premium-badge">{t('Premium')}</span>}</h2>
         </div>
         <div className="vault-actions">
+          {session ? (
+            <button onClick={() => signOut()} className="btn-secondary ghost" title={session.user.email}>
+              {t('Sign Out')}
+            </button>
+          ) : (
+            <button onClick={() => setShowAuthModal(true)} className="btn-secondary">
+              {t('Sign In')}
+            </button>
+          )}
           <button onClick={onGenerateNew} className="btn-primary">
             {t('Generate')}
           </button>
@@ -541,8 +640,12 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
               {((import.meta as any)?.env?.DEV as boolean) === true && (
                 <button onClick={repairVault} disabled={loading}>{t('Repair Vault')}</button>
               )}
+              <button onClick={handleAuditPasswords} disabled={loading || auditRunning}>
+                {auditRunning ? t('Auditing...') : t('Audit Passwords')}
+              </button>
               <button onClick={() => window.dispatchEvent(new Event('open-upgrade'))}>{t('Premium Access')}</button>
               <button onClick={() => window.dispatchEvent(new Event('open-storage-setup'))}>{t('Change Storage')}</button>
+              <button onClick={handleImportCSV} disabled={loading}>{t('Import from CSV (iCloud / Chrome)')}</button>
               {premiumTier !== 'free' && (
                 <>
                   <button onClick={handleExport} disabled={loading}>{t('Export Vault Backup')}</button>
@@ -657,7 +760,14 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
                   </svg>
                 </button>
                 <div className="entry-title">
-                  <h3>{entry.name}</h3>
+                  <h3>
+                    {entry.name}
+                    {compromisedEntries[entry.id] && (
+                      <span className="compromise-warning" title={t('Found in {{count}} known data breaches! Update immediately.', { count: compromisedEntries[entry.id] })}>
+                        ⚠️
+                      </span>
+                    )}
+                  </h3>
                   {entry.url && (
                     <a href={entry.url} target="_blank" rel="noopener noreferrer" className="entry-url ltr-input" title={entry.url} onClick={(e) => e.stopPropagation()}>
                       {(() => {
@@ -877,6 +987,15 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
           </div>
         </div>
       )}
+
+      <AuthModal
+        open={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        onSuccess={(user) => {
+          setSession({ user })
+          alert(t('Signed in as {{email}}', { email: user.email }))
+        }}
+      />
     </div>
   )
 }

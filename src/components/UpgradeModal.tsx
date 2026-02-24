@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { ConfigStore } from '../services/configStore'
 import { applyRemoteLicense } from '../services/license'
 import { copyText } from '../services/clipboard'
+import { Capacitor } from '@capacitor/core'
+import { purchasePackage, getSubscriptionOfferings, checkPremiumStatus } from '../services/revenuecat'
 import './UpgradeModal.css'
 import { useI18n } from '../services/i18n'
 
@@ -16,12 +18,19 @@ export default function UpgradeModal({ open, onClose }: UpgradeModalProps) {
   const store = new ConfigStore()
   const { t } = useI18n()
   const [installId, setInstallId] = useState<string>('')
+  const [offerings, setOfferings] = useState<any>(null)
+  const isNative = Capacitor.isNativePlatform()
 
   useEffect(() => {
     if (open) {
       setInstallId(store.getInstallId())
+      if (isNative) {
+        getSubscriptionOfferings().then((offs) => {
+          if (offs) setOfferings(offs)
+        })
+      }
     }
-  }, [open])
+  }, [open, isNative])
 
   const [licenseKey, setLicenseKey] = useState('')
   const [activationCode, setActivationCode] = useState('')
@@ -106,6 +115,56 @@ export default function UpgradeModal({ open, onClose }: UpgradeModalProps) {
             <h2>🎉 {t('You are already a Premium user!')}</h2>
             <p>{t('Enjoy unlimited passwords and cloud sync.')}</p>
             <button className="btn-primary" onClick={onClose}>{t('Close')}</button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (isNative) {
+    const handlePurchase = async (pkg: any) => {
+      try {
+        setRedeeming(true)
+        await purchasePackage(pkg)
+        const status = await checkPremiumStatus()
+        if (status !== 'free') {
+          store.setPremium(true)
+          alert(t('Purchase successful! Premium unlocked.'))
+          onClose()
+        }
+      } catch (err: any) {
+        if (err.code !== 1) alert(t('Purchase failed: {{msg}}', { msg: err.message }))
+      } finally {
+        setRedeeming(false)
+      }
+    }
+
+    return (
+      <div className="modal-backdrop" onClick={onClose}>
+        <div className="modal upgrade-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="upgrade-hero">
+            <div className="eyebrow">{t('PassGen Premium')}</div>
+            <h2>{t('Unlock Premium Features')}</h2>
+            <p className="modal-sub">{t('Unlimited passwords, cloud backup, and advanced security.')}</p>
+          </div>
+
+          <div className="activation-card" style={{ marginTop: '20px' }}>
+            {!offerings && <p style={{ textAlign: 'center' }}>{t('Loading plans...')}</p>}
+            {offerings && offerings.availablePackages.map((pkg: any) => (
+              <div key={pkg.identifier} className="method-option" onClick={() => handlePurchase(pkg)} style={{ marginBottom: '10px' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>{pkg.product.title}</div>
+                  <div style={{ fontSize: '0.9rem', opacity: 0.8 }}>{pkg.product.description}</div>
+                </div>
+                <div style={{ fontWeight: 'bold', fontSize: '1.2rem' }}>
+                  {pkg.product.priceString}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="actions" style={{ marginTop: '20px' }}>
+            <button className="btn-secondary ghost" onClick={onClose}>{t('Cancel')}</button>
           </div>
         </div>
       </div>

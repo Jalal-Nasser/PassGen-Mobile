@@ -3,6 +3,18 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import './index.css'
 import { I18nProvider } from './services/i18n'
+import { setupRevenueCat } from './services/revenuecat'
+
+setupRevenueCat()
+
+import { Capacitor } from '@capacitor/core'
+import { capacitorElectronAPI, capacitorClipboard } from './mobile/capacitorElectronAPI'
+
+if (Capacitor.isNativePlatform()) {
+  console.log('[Mobile] Injecting Capacitor Electron Polyfills...')
+    ; (window as any).electronAPI = capacitorElectronAPI
+    ; (window as any).electron = { clipboard: capacitorClipboard }
+}
 
 // Add error logging
 window.addEventListener('error', (event) => {
