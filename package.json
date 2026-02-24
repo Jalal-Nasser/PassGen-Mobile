@@ -8,7 +8,7 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
-    "build": "node scripts/write-build-info.js && tsc && vite build && node scripts/sync-icons.js && electron-builder",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 tsc && cross-env NODE_OPTIONS=--max-old-space-size=4096 vite build",
     "preview": "vite preview",
     "electron:dev": "tsc && vite --port 5173 --strictPort",
     "electron:build": "node scripts/write-build-info.js && tsc && vite build && node scripts/sync-icons.js && electron-builder",
