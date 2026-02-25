@@ -34,6 +34,52 @@ private enum NativeTab: Hashable {
     case settings
 }
 
+private enum PremiumTier: String, CaseIterable, Hashable {
+    case free
+    case pro
+    case cloud
+
+    var title: String {
+        switch self {
+        case .free:
+            return "FREE"
+        case .pro:
+            return "PRO"
+        case .cloud:
+            return "CLOUD"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .free:
+            return "Up to 4 passwords"
+        case .pro:
+            return "Unlimited passwords"
+        case .cloud:
+            return "Unlimited + cloud tier"
+        }
+    }
+
+    var priceLabel: String {
+        switch self {
+        case .free:
+            return "$0"
+        case .pro:
+            return "$2.99/mo"
+        case .cloud:
+            return "$4.99/mo"
+        }
+    }
+}
+
+private struct OnboardingPage: Identifiable {
+    let id: Int
+    let title: String
+    let subtitle: String
+    let systemImage: String
+}
+
 private struct AlertState: Identifiable {
     let id = UUID()
     let message: String
@@ -392,6 +438,8 @@ private final class NativeVaultStore {
 
 private final class NativeVaultViewModel: ObservableObject {
     @Published var isBooting = true
+    @Published var showOnboarding = false
+    @Published var onboardingIndex = 0
     @Published var hasVault = false
     @Published var isUnlocked = false
     @Published var masterPassword = ""
@@ -405,6 +453,8 @@ private final class NativeVaultViewModel: ObservableObject {
     @Published var showEditorSheet = false
     @Published var draft = VaultEntryDraft.empty
     @Published var showResetPrompt = false
+    @Published var showPlanSheet = false
+    @Published var selectedTier: PremiumTier = .free
 
     @Published var generatedPassword = ""
     @Published var length = 18
@@ -414,10 +464,40 @@ private final class NativeVaultViewModel: ObservableObject {
     @Published var includeSymbols = true
 
     private let hintStorageKey = "passgen-password-hint"
+    private let onboardingStorageKey = "passgen-onboarding-complete-native"
+    private let planStorageKey = "passgen-plan-tier-native"
     private let store = NativeVaultStore()
+    private let onboardingPagesData: [OnboardingPage] = [
+        OnboardingPage(
+            id: 0,
+            title: "Secure Generator",
+            subtitle: "Create strong passwords instantly with full control over length and symbols.",
+            systemImage: "key.fill"
+        ),
+        OnboardingPage(
+            id: 1,
+            title: "Encrypted Vault",
+            subtitle: "Store passwords in encrypted local storage protected by your master password.",
+            systemImage: "lock.shield.fill"
+        ),
+        OnboardingPage(
+            id: 2,
+            title: "Plans",
+            subtitle: "FREE includes 4 entries. PRO and CLOUD unlock unlimited vault entries.",
+            systemImage: "crown.fill"
+        )
+    ]
 
     init() {
         bootstrap()
+    }
+
+    var onboardingPages: [OnboardingPage] {
+        onboardingPagesData
+    }
+
+    var freePlanLimit: Int {
+        4
     }
 
     var filteredEntries: [VaultEntry] {
@@ -435,8 +515,36 @@ private final class NativeVaultViewModel: ObservableObject {
     func bootstrap() {
         hasVault = store.hasVault()
         passwordHint = UserDefaults.standard.string(forKey: hintStorageKey) ?? ""
+        showOnboarding = !UserDefaults.standard.bool(forKey: onboardingStorageKey)
+        if let storedTier = UserDefaults.standard.string(forKey: planStorageKey),
+           let parsedTier = PremiumTier(rawValue: storedTier) {
+            selectedTier = parsedTier
+        } else {
+            selectedTier = .free
+        }
         generatedPassword = generatePassword()
-        isBooting = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            self?.isBooting = false
+        }
+    }
+
+    func nextOnboardingStep() {
+        if onboardingIndex < onboardingPagesData.count - 1 {
+            onboardingIndex += 1
+        } else {
+            completeOnboarding()
+        }
+    }
+
+    func completeOnboarding() {
+        showOnboarding = false
+        onboardingIndex = 0
+        UserDefaults.standard.set(true, forKey: onboardingStorageKey)
+    }
+
+    func setTier(_ tier: PremiumTier) {
+        selectedTier = tier
+        UserDefaults.standard.set(tier.rawValue, forKey: planStorageKey)
     }
 
     func unlockVault() {
@@ -481,6 +589,11 @@ private final class NativeVaultViewModel: ObservableObject {
     }
 
     func startCreateEntry(seedPassword: String? = nil) {
+        if selectedTier == .free && entries.count >= freePlanLimit {
+            alertState = AlertState(message: "Free plan allows up to 4 passwords. Upgrade to PRO for unlimited entries.")
+            showPlanSheet = true
+            return
+        }
         draft = .empty
         if let seedPassword {
             draft.password = seedPassword
@@ -503,6 +616,12 @@ private final class NativeVaultViewModel: ObservableObject {
 
         guard !draft.password.isEmpty else {
             alertState = AlertState(message: "Password is required.")
+            return false
+        }
+
+        if draft.id == nil, selectedTier == .free, entries.count >= freePlanLimit {
+            alertState = AlertState(message: "Free plan allows up to 4 passwords. Upgrade to PRO for unlimited entries.")
+            showPlanSheet = true
             return false
         }
 
@@ -531,6 +650,10 @@ private final class NativeVaultViewModel: ObservableObject {
     func copyToClipboard(_ value: String, label: String) {
         UIPasteboard.general.string = value
         alertState = AlertState(message: "\(label) copied.")
+    }
+
+    func showComingSoon(_ feature: String) {
+        alertState = AlertState(message: "\(feature) will be enabled in the next iOS update.")
     }
 
     func generatePassword() -> String {
@@ -576,9 +699,13 @@ private final class NativeVaultViewModel: ObservableObject {
         do {
             try store.reset()
             UserDefaults.standard.removeObject(forKey: hintStorageKey)
+            UserDefaults.standard.removeObject(forKey: onboardingStorageKey)
+            UserDefaults.standard.removeObject(forKey: planStorageKey)
 
             hasVault = false
             isUnlocked = false
+            showOnboarding = true
+            onboardingIndex = 0
             passwordHint = ""
             passwordHintInput = ""
             masterPassword = ""
@@ -586,7 +713,9 @@ private final class NativeVaultViewModel: ObservableObject {
             entries = []
             draft = .empty
             showEditorSheet = false
+            showPlanSheet = false
             activeTab = .vault
+            selectedTier = .free
             generatedPassword = generatePassword()
         } catch {
             alertState = AlertState(message: "Unable to reset app data.")
@@ -610,9 +739,9 @@ private struct NativeVaultRootView: View {
             .ignoresSafeArea()
 
             if viewModel.isBooting {
-                ProgressView("Loading Vault")
-                    .tint(.white)
-                    .foregroundColor(.white)
+                NativeSplashIntroView()
+            } else if viewModel.showOnboarding {
+                NativeOnboardingView(viewModel: viewModel)
             } else if !viewModel.isUnlocked {
                 NativeUnlockView(viewModel: viewModel)
             } else {
@@ -632,6 +761,141 @@ private struct NativeVaultRootView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        .sheet(isPresented: $viewModel.showPlanSheet) {
+            NativePlansView(viewModel: viewModel)
+        }
+    }
+}
+
+private struct NativeSplashIntroView: View {
+    @State private var animateLogo = false
+
+    var body: some View {
+        VStack(spacing: 20) {
+            NativeLogoView()
+                .scaleEffect(animateLogo ? 1.0 : 0.86)
+                .opacity(animateLogo ? 1.0 : 0.75)
+                .animation(.easeInOut(duration: 0.8), value: animateLogo)
+
+            Text("PassGen Vault")
+                .font(.system(size: 30, weight: .bold))
+                .foregroundColor(.white)
+
+            Text("Loading secure workspace...")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundColor(Color.white.opacity(0.9))
+
+            ProgressView()
+                .tint(.white)
+                .padding(.top, 6)
+        }
+        .padding(.horizontal, 24)
+        .onAppear {
+            animateLogo = true
+        }
+    }
+}
+
+private struct NativeOnboardingView: View {
+    @ObservedObject var viewModel: NativeVaultViewModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Spacer()
+                Button("Skip") {
+                    viewModel.completeOnboarding()
+                }
+                .foregroundColor(.white.opacity(0.9))
+                .font(.system(size: 15, weight: .semibold))
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
+
+            TabView(selection: $viewModel.onboardingIndex) {
+                ForEach(viewModel.onboardingPages) { page in
+                    VStack(spacing: 18) {
+                        Image(systemName: page.systemImage)
+                            .font(.system(size: 56, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(20)
+                            .background(Color.white.opacity(0.16))
+                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+
+                        Text(page.title)
+                            .font(.system(size: 31, weight: .bold))
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.center)
+
+                        Text(page.subtitle)
+                            .font(.system(size: 17, weight: .medium))
+                            .foregroundColor(Color.white.opacity(0.9))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 26)
+                    }
+                    .tag(page.id)
+                    .padding(.top, 50)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .always))
+
+            Button(viewModel.onboardingIndex == viewModel.onboardingPages.count - 1 ? "Get Started" : "Continue") {
+                viewModel.nextOnboardingStep()
+            }
+            .font(.system(size: 17, weight: .bold))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(Color.white)
+            .foregroundColor(Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
+            .cornerRadius(14)
+            .padding(.horizontal, 22)
+            .padding(.bottom, 30)
+        }
+    }
+}
+
+private struct NativePlansView: View {
+    @ObservedObject var viewModel: NativeVaultViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(PremiumTier.allCases, id: \.self) { tier in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(tier.title)
+                                .font(.system(size: 16, weight: .bold))
+                            Spacer()
+                            Text(tier.priceLabel)
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundColor(Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
+                        }
+
+                        Text(tier.subtitle)
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundColor(.secondary)
+
+                        Button(viewModel.selectedTier == tier ? "Current Plan" : "Select Plan") {
+                            viewModel.setTier(tier)
+                            dismiss()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(viewModel.selectedTier == tier)
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
+            .navigationTitle("Plans")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .navigationViewStyle(.stack)
     }
 }
 
@@ -702,11 +966,6 @@ private struct NativeUnlockView: View {
             .background(Color.white.opacity(0.2))
             .cornerRadius(20)
             .padding(.horizontal, 16)
-
-            Text("Native iOS local vault. No Supabase or S3 in mobile app.")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(Color.white.opacity(0.88))
-                .padding(.top, 4)
         }
         .padding(.top, 24)
         .padding(.horizontal, 10)
@@ -746,6 +1005,29 @@ private struct NativeVaultTabView: View {
     var body: some View {
         NavigationView {
             List {
+                Section {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Plan: \(viewModel.selectedTier.title)")
+                                .font(.system(size: 13, weight: .semibold))
+                            if viewModel.selectedTier == .free {
+                                Text("\(viewModel.entries.count)/\(viewModel.freePlanLimit) passwords used")
+                                    .font(.system(size: 12, weight: .regular))
+                                    .foregroundColor(.secondary)
+                            } else {
+                                Text("Unlimited passwords enabled")
+                                    .font(.system(size: 12, weight: .regular))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Button("Upgrade") {
+                            viewModel.showPlanSheet = true
+                        }
+                        .font(.system(size: 13, weight: .bold))
+                    }
+                }
+
                 if viewModel.filteredEntries.isEmpty {
                     Text("No entries yet. Tap + to add your first password.")
                         .foregroundColor(.secondary)
@@ -879,6 +1161,30 @@ private struct NativeSettingsTabView: View {
     var body: some View {
         NavigationView {
             Form {
+                Section("Subscription") {
+                    HStack {
+                        Text("Current Plan")
+                        Spacer()
+                        Text(viewModel.selectedTier.title)
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
+                    }
+
+                    Button("Manage Plans") {
+                        viewModel.showPlanSheet = true
+                    }
+                }
+
+                Section("Authentication") {
+                    Button("Sign in with Apple") {
+                        viewModel.showComingSoon("Sign in with Apple")
+                    }
+
+                    Button("Sign in with Google") {
+                        viewModel.showComingSoon("Sign in with Google")
+                    }
+                }
+
                 Section("Security") {
                     Button("Lock Vault") {
                         viewModel.lockVault()
@@ -887,11 +1193,6 @@ private struct NativeSettingsTabView: View {
                     Button("Reset Local App", role: .destructive) {
                         viewModel.showResetPrompt = true
                     }
-                }
-
-                Section("Storage") {
-                    Text("This is a native iOS local vault implementation. Supabase and S3 are not used in the mobile app.")
-                        .foregroundColor(.secondary)
                 }
             }
             .navigationTitle("Settings")
