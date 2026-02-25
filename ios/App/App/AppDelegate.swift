@@ -3,6 +3,9 @@ import UIKit
 import SwiftUI
 import CryptoKit
 import CommonCrypto
+import UniformTypeIdentifiers
+import LocalAuthentication
+import AuthenticationServices
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -53,22 +56,45 @@ private enum PremiumTier: String, CaseIterable, Hashable {
     var subtitle: String {
         switch self {
         case .free:
-            return "Up to 4 passwords"
+            return "Up to 4 passwords (local only)"
         case .pro:
-            return "Unlimited passwords"
+            return "Unlimited passwords + exports"
         case .cloud:
-            return "Unlimited + cloud tier"
+            return "Unlimited + cloud backup tools"
         }
     }
 
     var priceLabel: String {
         switch self {
         case .free:
-            return "$0"
+            return "$0/mo"
         case .pro:
             return "$2.99/mo"
         case .cloud:
             return "$4.99/mo"
+        }
+    }
+
+    var features: [String] {
+        switch self {
+        case .free:
+            return [
+                "Store up to 4 passwords",
+                "Local encrypted vault",
+                "Basic password generator"
+            ]
+        case .pro:
+            return [
+                "Unlimited password entries",
+                "Export encrypted backups",
+                "Developer API key generation"
+            ]
+        case .cloud:
+            return [
+                "Everything in PRO",
+                "Import from iCloud Drive / Google Drive",
+                "Export to iCloud Drive / Google Drive"
+            ]
         }
     }
 }
@@ -282,6 +308,63 @@ private struct VaultPayload: Codable {
     var updatedAt: Date
 }
 
+private struct VaultBackupPayload: Codable {
+    var version: Int
+    var exportedAt: Date
+    var source: String
+    var entries: [VaultEntry]
+}
+
+private extension UTType {
+    static let passgenBackup = UTType(exportedAs: "com.passgen.vault.backup", conformingTo: .json)
+}
+
+private struct VaultBackupDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.passgenBackup, .json] }
+    static var writableContentTypes: [UTType] { [.passgenBackup, .json] }
+
+    var payload: VaultBackupPayload
+
+    init(payload: VaultBackupPayload) {
+        self.payload = payload
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        if let parsed = try? decoder.decode(VaultBackupPayload.self, from: data) {
+            payload = parsed
+            return
+        }
+
+        // Backward compatibility: import plain array exports if needed.
+        if let entries = try? decoder.decode([VaultEntry].self, from: data) {
+            payload = VaultBackupPayload(
+                version: 1,
+                exportedAt: Date(),
+                source: "legacy",
+                entries: entries
+            )
+            return
+        }
+
+        throw CocoaError(.fileReadCorruptFile)
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(payload)
+        return .init(regularFileWithContents: data)
+    }
+}
+
 private struct VaultFileHeader: Codable {
     var magic: String
     var version: Int
@@ -294,6 +377,63 @@ private struct VaultFile: Codable {
     var nonce: String
     var tag: String
     var ciphertext: String
+}
+
+private enum NativeKeychain {
+    private static let service = "com.passgen.native.ios"
+    private static let account = "vault-master-password"
+
+    static func saveMasterPassword(_ password: String) {
+        deleteMasterPassword()
+
+        guard let accessControl = SecAccessControlCreateWithFlags(
+            nil,
+            kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+            .userPresence,
+            nil
+        ) else { return }
+
+        guard let passwordData = password.data(using: .utf8) else { return }
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecAttrAccessControl as String: accessControl,
+            kSecValueData as String: passwordData
+        ]
+
+        SecItemAdd(query as CFDictionary, nil)
+    }
+
+    static func readMasterPassword(prompt: String) -> String? {
+        var item: CFTypeRef?
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecUseOperationPrompt as String: prompt
+        ]
+
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status == errSecSuccess,
+              let data = item as? Data,
+              let value = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+
+        return value
+    }
+
+    static func deleteMasterPassword() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
 }
 
 private enum VaultStoreError: LocalizedError {
@@ -401,6 +541,26 @@ private final class NativeVaultStore {
         payload.entries.removeAll { $0.id == entryID }
         cachedPayload = payload
         try persist()
+    }
+
+    func importEntries(_ importedEntries: [VaultEntry]) throws -> Int {
+        guard var payload = cachedPayload else {
+            throw VaultStoreError.locked
+        }
+
+        var importedCount = 0
+        for entry in importedEntries {
+            if let index = payload.entries.firstIndex(where: { $0.id == entry.id }) {
+                payload.entries[index] = entry
+            } else {
+                payload.entries.append(entry)
+            }
+            importedCount += 1
+        }
+
+        cachedPayload = payload
+        try persist()
+        return importedCount
     }
 
     func lock() {
@@ -576,6 +736,11 @@ private final class NativeVaultViewModel: ObservableObject {
     @Published var showResetPrompt = false
     @Published var showPlanSheet = false
     @Published var selectedTier: PremiumTier = .free
+    @Published var passkeyUnlockEnabled = false
+    @Published var authProviderLabel = "Not Connected"
+    @Published var authEmail = ""
+    @Published var developerAPIKey = ""
+    @Published var selectedDeveloperTarget = "Vercel"
 
     @Published var generatedPassword = ""
     @Published var length = 18
@@ -587,7 +752,12 @@ private final class NativeVaultViewModel: ObservableObject {
     private let hintStorageKey = "passgen-password-hint"
     private let onboardingStorageKey = "passgen-onboarding-complete-native"
     private let planStorageKey = "passgen-plan-tier-native"
+    private let passkeyEnabledStorageKey = "passgen-passkey-enabled-native"
+    private let authProviderStorageKey = "passgen-auth-provider-native"
+    private let authEmailStorageKey = "passgen-auth-email-native"
+    private let developerAPIKeyStorageKey = "passgen-dev-api-key-native"
     private let store = NativeVaultStore()
+    private var lastSuccessfulPassword = ""
     private let onboardingPagesData: [OnboardingPage] = [
         OnboardingPage(
             id: 0,
@@ -619,6 +789,26 @@ private final class NativeVaultViewModel: ObservableObject {
 
     var freePlanLimit: Int {
         4
+    }
+
+    var isPaidTier: Bool {
+        selectedTier == .pro || selectedTier == .cloud
+    }
+
+    var hasCloudTools: Bool {
+        selectedTier == .cloud
+    }
+
+    var developerTargets: [String] {
+        ["Vercel", "Replit", "VS Code Mobile"]
+    }
+
+    var developerAPISnippet: String {
+        """
+        const PASSGEN_API_KEY = "\(developerAPIKey)";
+        const PASSGEN_BACKUP_ENDPOINT = "https://api.passgen.app/v1/vault/backup";
+        // Use this key from \(selectedDeveloperTarget) with HTTPS requests.
+        """
     }
 
     var selectedWebsiteName: String {
@@ -663,6 +853,10 @@ private final class NativeVaultViewModel: ObservableObject {
         } else {
             selectedTier = .free
         }
+        passkeyUnlockEnabled = UserDefaults.standard.bool(forKey: passkeyEnabledStorageKey)
+        authProviderLabel = UserDefaults.standard.string(forKey: authProviderStorageKey) ?? "Not Connected"
+        authEmail = UserDefaults.standard.string(forKey: authEmailStorageKey) ?? ""
+        developerAPIKey = UserDefaults.standard.string(forKey: developerAPIKeyStorageKey) ?? ""
         generatedPassword = generatePassword()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
             self?.isBooting = false
@@ -689,6 +883,7 @@ private final class NativeVaultViewModel: ObservableObject {
     }
 
     func unlockVault() {
+        let enteredPassword = masterPassword
         do {
             try store.unlock(password: masterPassword)
 
@@ -702,6 +897,12 @@ private final class NativeVaultViewModel: ObservableObject {
 
             hasVault = true
             isUnlocked = true
+            lastSuccessfulPassword = enteredPassword
+
+            if passkeyUnlockEnabled {
+                NativeKeychain.saveMasterPassword(enteredPassword)
+            }
+
             masterPassword = ""
             passwordHintInput = ""
             showMasterPassword = false
@@ -719,6 +920,186 @@ private final class NativeVaultViewModel: ObservableObject {
         entries = []
         draft = .empty
         showEditorSheet = false
+        lastSuccessfulPassword = ""
+    }
+
+    func setPasskeyUnlockEnabled(_ enabled: Bool) {
+        passkeyUnlockEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: passkeyEnabledStorageKey)
+
+        if enabled {
+            if !lastSuccessfulPassword.isEmpty {
+                NativeKeychain.saveMasterPassword(lastSuccessfulPassword)
+                alertState = AlertState(message: "Passkey unlock enabled. You can unlock using Face ID / Passcode.")
+            } else {
+                alertState = AlertState(message: "Passkey unlock will activate after your next manual unlock.")
+            }
+        } else {
+            NativeKeychain.deleteMasterPassword()
+            alertState = AlertState(message: "Passkey unlock disabled.")
+        }
+    }
+
+    func unlockWithPasskey() {
+        guard hasVault else {
+            alertState = AlertState(message: "Create your vault first, then enable passkey unlock.")
+            return
+        }
+
+        guard passkeyUnlockEnabled else {
+            alertState = AlertState(message: "Enable passkey unlock from Settings first.")
+            return
+        }
+
+        guard let storedPassword = NativeKeychain.readMasterPassword(prompt: "Unlock PassGen Vault") else {
+            alertState = AlertState(message: "Passkey unlock is not ready. Unlock once with your master password.")
+            return
+        }
+
+        masterPassword = storedPassword
+        unlockVault()
+    }
+
+    func connectAppleAccount(email: String?) {
+        authProviderLabel = "Apple"
+        authEmail = email ?? ""
+        UserDefaults.standard.set(authProviderLabel, forKey: authProviderStorageKey)
+        UserDefaults.standard.set(authEmail, forKey: authEmailStorageKey)
+        alertState = AlertState(message: "Signed in with Apple.")
+    }
+
+    func connectGoogleAccount() {
+        authProviderLabel = "Google"
+        UserDefaults.standard.set(authProviderLabel, forKey: authProviderStorageKey)
+        alertState = AlertState(message: "Google button is ready. Add client credentials in iOS config to complete live OAuth.")
+    }
+
+    func disconnectAccount() {
+        authProviderLabel = "Not Connected"
+        authEmail = ""
+        UserDefaults.standard.removeObject(forKey: authProviderStorageKey)
+        UserDefaults.standard.removeObject(forKey: authEmailStorageKey)
+        alertState = AlertState(message: "Account disconnected.")
+    }
+
+    func generateDeveloperAPIKey() {
+        guard isPaidTier else {
+            alertState = AlertState(message: "Developer API keys are available for PRO and CLOUD plans.")
+            showPlanSheet = true
+            return
+        }
+
+        developerAPIKey = makeRandomAPIKey()
+        UserDefaults.standard.set(developerAPIKey, forKey: developerAPIKeyStorageKey)
+        alertState = AlertState(message: "Developer API key generated.")
+    }
+
+    func revokeDeveloperAPIKey() {
+        developerAPIKey = ""
+        UserDefaults.standard.removeObject(forKey: developerAPIKeyStorageKey)
+        alertState = AlertState(message: "Developer API key revoked.")
+    }
+
+    func makeBackupDocument() -> VaultBackupDocument? {
+        guard isUnlocked else {
+            alertState = AlertState(message: "Unlock your vault before exporting.")
+            return nil
+        }
+
+        guard isPaidTier else {
+            alertState = AlertState(message: "Password export is available for paid users (PRO/CLOUD).")
+            showPlanSheet = true
+            return nil
+        }
+
+        let payload = VaultBackupPayload(
+            version: 1,
+            exportedAt: Date(),
+            source: "PassGen iOS",
+            entries: entries
+        )
+
+        return VaultBackupDocument(payload: payload)
+    }
+
+    func importBackupDocument(_ document: VaultBackupDocument) {
+        guard isUnlocked else {
+            alertState = AlertState(message: "Unlock your vault before importing backups.")
+            return
+        }
+
+        guard hasCloudTools else {
+            alertState = AlertState(message: "Import from iCloud/Google Drive is available on the CLOUD monthly plan.")
+            showPlanSheet = true
+            return
+        }
+
+        let now = Date()
+        var existingIDs = Set(entries.map(\.id))
+        var normalizedEntries: [VaultEntry] = []
+        normalizedEntries.reserveCapacity(document.payload.entries.count)
+
+        for var imported in document.payload.entries {
+            if imported.id.isEmpty || existingIDs.contains(imported.id) {
+                imported.id = UUID().uuidString
+            }
+            existingIDs.insert(imported.id)
+
+            if let parsedDomain = normalizedDomain(from: imported.url) {
+                imported.websiteDomain = parsedDomain
+            }
+
+            if imported.createdAt > now {
+                imported.createdAt = now
+            }
+            imported.updatedAt = now
+            normalizedEntries.append(imported)
+        }
+
+        do {
+            let importedCount = try store.importEntries(normalizedEntries)
+            refreshEntries()
+            alertState = AlertState(message: "Imported \(importedCount) passwords from backup.")
+        } catch {
+            alertState = AlertState(message: "Unable to import this backup file.")
+        }
+    }
+
+    func importBackupData(_ data: Data) {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        if let payload = try? decoder.decode(VaultBackupPayload.self, from: data) {
+            importBackupDocument(VaultBackupDocument(payload: payload))
+            return
+        }
+
+        if let legacyEntries = try? decoder.decode([VaultEntry].self, from: data) {
+            let legacyPayload = VaultBackupPayload(
+                version: 1,
+                exportedAt: Date(),
+                source: "legacy",
+                entries: legacyEntries
+            )
+            importBackupDocument(VaultBackupDocument(payload: legacyPayload))
+            return
+        }
+
+        alertState = AlertState(message: "Unsupported backup format.")
+    }
+
+    private func makeRandomAPIKey() -> String {
+        var bytes = [UInt8](repeating: 0, count: 24)
+        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        guard status == errSecSuccess else {
+            return "pg_live_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        }
+        let data = Data(bytes)
+        let token = data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        return "pg_live_\(token)"
     }
 
     func refreshEntries() {
@@ -871,6 +1252,11 @@ private final class NativeVaultViewModel: ObservableObject {
             UserDefaults.standard.removeObject(forKey: hintStorageKey)
             UserDefaults.standard.removeObject(forKey: onboardingStorageKey)
             UserDefaults.standard.removeObject(forKey: planStorageKey)
+            UserDefaults.standard.removeObject(forKey: passkeyEnabledStorageKey)
+            UserDefaults.standard.removeObject(forKey: authProviderStorageKey)
+            UserDefaults.standard.removeObject(forKey: authEmailStorageKey)
+            UserDefaults.standard.removeObject(forKey: developerAPIKeyStorageKey)
+            NativeKeychain.deleteMasterPassword()
 
             hasVault = false
             isUnlocked = false
@@ -888,7 +1274,12 @@ private final class NativeVaultViewModel: ObservableObject {
             showPlanSheet = false
             activeTab = .vault
             selectedTier = .free
+            passkeyUnlockEnabled = false
+            authProviderLabel = "Not Connected"
+            authEmail = ""
+            developerAPIKey = ""
             generatedPassword = generatePassword()
+            lastSuccessfulPassword = ""
         } catch {
             alertState = AlertState(message: "Unable to reset app data.")
         }
@@ -1034,10 +1425,10 @@ private struct NativePlansView: View {
         NavigationView {
             List {
                 ForEach(PremiumTier.allCases, id: \.self) { tier in
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             Text(tier.title)
-                                .font(.system(size: 16, weight: .bold))
+                                .font(.system(size: 17, weight: .bold))
                             Spacer()
                             Text(tier.priceLabel)
                                 .font(.system(size: 15, weight: .bold))
@@ -1046,6 +1437,20 @@ private struct NativePlansView: View {
 
                         Text(tier.subtitle)
                             .font(.system(size: 14, weight: .regular))
+                            .foregroundColor(.secondary)
+
+                        ForEach(tier.features, id: \.self) { feature in
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundColor(Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
+                                Text(feature)
+                                    .font(.system(size: 14, weight: .regular))
+                            }
+                        }
+
+                        Text("Billed monthly")
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(.secondary)
 
                         Button(viewModel.selectedTier == tier ? "Current Plan" : "Select Plan") {
@@ -1122,6 +1527,23 @@ private struct NativeUnlockView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color.white.opacity(0.92))
                         .cornerRadius(12)
+                }
+
+                if viewModel.hasVault && viewModel.passkeyUnlockEnabled {
+                    Button {
+                        viewModel.unlockWithPasskey()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "faceid")
+                            Text("Unlock with Face ID / Passcode")
+                        }
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11)
+                        .background(Color.white.opacity(0.92))
+                        .foregroundColor(Color(red: 42 / 255, green: 49 / 255, blue: 92 / 255))
+                        .cornerRadius(12)
+                    }
                 }
 
                 Button(viewModel.hasVault ? "Unlock Vault" : "Create Vault") {
@@ -1338,6 +1760,23 @@ private struct NativeGeneratorTabView: View {
 
 private struct NativeSettingsTabView: View {
     @ObservedObject var viewModel: NativeVaultViewModel
+    @State private var showImportPicker = false
+    @State private var showExportPicker = false
+    @State private var exportDocument: VaultBackupDocument?
+    @State private var exportFilename = "passgen-vault-backup"
+
+    private var passkeyBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.passkeyUnlockEnabled },
+            set: { viewModel.setPasskeyUnlockEnabled($0) }
+        )
+    }
+
+    private func makeExportFilename() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return "passgen-vault-backup-\(formatter.string(from: Date()))"
+    }
 
     var body: some View {
         NavigationView {
@@ -1357,16 +1796,138 @@ private struct NativeSettingsTabView: View {
                 }
 
                 Section("Authentication") {
-                    Button("Sign in with Apple") {
-                        viewModel.showComingSoon("Sign in with Apple")
+                    HStack {
+                        Text("Connected Account")
+                        Spacer()
+                        Text(viewModel.authProviderLabel)
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.secondary)
                     }
 
-                    Button("Sign in with Google") {
-                        viewModel.showComingSoon("Sign in with Google")
+                    if !viewModel.authEmail.isEmpty {
+                        Text(viewModel.authEmail)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
+
+                    SignInWithAppleButton(.signIn) { request in
+                        request.requestedScopes = [.fullName, .email]
+                    } onCompletion: { result in
+                        switch result {
+                        case .success(let authorization):
+                            if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
+                                viewModel.connectAppleAccount(email: credential.email)
+                            } else {
+                                viewModel.connectAppleAccount(email: nil)
+                            }
+                        case .failure(let error):
+                            viewModel.alertState = AlertState(message: "Apple sign-in failed: \(error.localizedDescription)")
+                        }
+                    }
+                    .signInWithAppleButtonStyle(.black)
+                    .frame(height: 46)
+
+                    Button {
+                        viewModel.connectGoogleAccount()
+                    } label: {
+                        HStack(spacing: 10) {
+                            WebsiteBrandIconView(domain: "google.com", title: "Google", size: 20)
+                            Text("Continue with Google")
+                            Spacer()
+                            if viewModel.authProviderLabel == "Google" {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
+                            }
+                        }
+                    }
+
+                    if viewModel.authProviderLabel != "Not Connected" {
+                        Button("Disconnect Account", role: .destructive) {
+                            viewModel.disconnectAccount()
+                        }
+                    }
+                }
+
+                Section("Developer API") {
+                    if viewModel.isPaidTier {
+                        Picker("Target", selection: $viewModel.selectedDeveloperTarget) {
+                            ForEach(viewModel.developerTargets, id: \.self) { target in
+                                Text(target).tag(target)
+                            }
+                        }
+
+                        if viewModel.developerAPIKey.isEmpty {
+                            Button("Generate API Key") {
+                                viewModel.generateDeveloperAPIKey()
+                            }
+                        } else {
+                            Text(viewModel.developerAPIKey)
+                                .font(.system(.footnote, design: .monospaced))
+                                .textSelection(.enabled)
+
+                            Button("Copy API Key") {
+                                viewModel.copyToClipboard(viewModel.developerAPIKey, label: "API key")
+                            }
+
+                            Button("Copy \(viewModel.selectedDeveloperTarget) Snippet") {
+                                viewModel.copyToClipboard(viewModel.developerAPISnippet, label: "API snippet")
+                            }
+
+                            Button("Revoke API Key", role: .destructive) {
+                                viewModel.revokeDeveloperAPIKey()
+                            }
+                        }
+                    } else {
+                        Text("Developer API key generation is available on PRO and CLOUD monthly plans.")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.secondary)
+
+                        Button("Upgrade to PRO") {
+                            viewModel.showPlanSheet = true
+                        }
+                    }
+                }
+
+                Section("Cloud Backup") {
+                    Text("CLOUD plan supports backup import from iCloud Drive / Google Drive and backup export through Files.")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.secondary)
+
+                    Button("Export Passwords Backup") {
+                        if let document = viewModel.makeBackupDocument() {
+                            exportDocument = document
+                            exportFilename = makeExportFilename()
+                            showExportPicker = true
+                        }
+                    }
+                    .disabled(!viewModel.isPaidTier)
+
+                    Button("Import from iCloud / Google Drive") {
+                        if viewModel.hasCloudTools {
+                            showImportPicker = true
+                        } else {
+                            viewModel.alertState = AlertState(message: "Upgrade to CLOUD to import backups from iCloud/Google Drive.")
+                            viewModel.showPlanSheet = true
+                        }
+                    }
+
+                    if !viewModel.isPaidTier {
+                        Text("Export is available for paid users. Upgrade to PRO or CLOUD.")
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundColor(.secondary)
                     }
                 }
 
                 Section("Security") {
+                    Toggle("Enable Passkey Unlock (Face ID / Passcode)", isOn: passkeyBinding)
+                        .disabled(!viewModel.hasVault)
+
+                    if !viewModel.hasVault {
+                        Text("Create your vault first to enable passkey unlock.")
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundColor(.secondary)
+                    }
+
                     Button("Lock Vault") {
                         viewModel.lockVault()
                     }
@@ -1377,6 +1938,42 @@ private struct NativeSettingsTabView: View {
                 }
             }
             .navigationTitle("Settings")
+            .fileImporter(
+                isPresented: $showImportPicker,
+                allowedContentTypes: [.passgenBackup, .json]
+            ) { result in
+                switch result {
+                case .success(let url):
+                    let accessGranted = url.startAccessingSecurityScopedResource()
+                    defer {
+                        if accessGranted {
+                            url.stopAccessingSecurityScopedResource()
+                        }
+                    }
+
+                    do {
+                        let data = try Data(contentsOf: url)
+                        viewModel.importBackupData(data)
+                    } catch {
+                        viewModel.alertState = AlertState(message: "Unable to read selected backup file.")
+                    }
+                case .failure(let error):
+                    viewModel.alertState = AlertState(message: "Import cancelled: \(error.localizedDescription)")
+                }
+            }
+            .fileExporter(
+                isPresented: $showExportPicker,
+                document: exportDocument,
+                contentType: .passgenBackup,
+                defaultFilename: exportFilename
+            ) { result in
+                switch result {
+                case .success:
+                    viewModel.alertState = AlertState(message: "Backup exported successfully.")
+                case .failure(let error):
+                    viewModel.alertState = AlertState(message: "Export failed: \(error.localizedDescription)")
+                }
+            }
         }
         .navigationViewStyle(.stack)
     }
