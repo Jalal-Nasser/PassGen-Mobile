@@ -940,7 +940,7 @@ private struct NativeEntryEditorView: View {
                             dismiss()
                         }
                     }
-                    .fontWeight(.bold)
+                    .font(.system(size: 17, weight: .bold))
                 }
             }
         }
