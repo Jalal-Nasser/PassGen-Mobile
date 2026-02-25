@@ -24,43 +24,22 @@ The project heavily utilizes a modern cross-platform mobile web stack:
 - **Supabase**: The backend-as-a-service providing Authentication (Google, Apple).
 - **RevenueCat**: Used to manage mobile In-App Purchases (IAP) and subscriptions across the Apple App Store and Google Play Store.
 
----
+## Features & Capabilities
 
-## What We Did (Implementation & Fixes)
+### 🔐 Secure Password Generation
+- Create highly secure, randomized passwords on the go.
+- Full control over password length, uppercase/lowercase letters, numbers, and special symbols.
 
-### 1. Authentication Integration
-- Integrated `@supabase/supabase-js`.
-- Implemented **Sign in with Google** and **Sign in with Apple** (which is mandatory for iOS when third-party logins are used).
-- Created a custom Authentication Modal in the `PasswordVault` header.
-- Transitioned the premium verification status to be bound to the authenticated `user.id` instead of an offline local `installId`.
+### 🗄️ Encrypted Local Vault
+- Store all your passwords securely directly on your device.
+- Offline-first architecture ensures your vault is accessible anywhere, anytime without requiring a connection.
+- Biometric authentication (Face ID / Touch ID) support for quick and secure access.
 
-### 2. Cloud Storage & Synchronization Integrations
-- Configured local encrypted storage for the offline-first mobile architecture.
-- Integrated **Google Drive API** and **iCloud** as the core database and cloud backup layer for mobile users, replacing the need for an external backend like Supabase on mobile.
-- Modified the authentication flows to leverage native Google Sign-In and Apple Sign-In plugins specifically for granting access to users' personal cloud drives.
+### ☁️ Seamless Cloud Synchronization (CLOUD Plan)
+- Securely backup and sync your encrypted vault across all your devices.
+- Uses your personal **Google Drive** (Android) or **iCloud** (iOS) account—meaning your raw data never touches our servers.
 
-### 3. Mobile Monetization (In-App Purchases)
-- Implemented the core business logic for the app's subscription tiers:
-  - **Free Plan**: Hard limit of 4 stored passwords.
-  - **PRO Plan ($2.99/mo)**: Unlocks unlimited password entries (offline storage only).
-  - **CLOUD Plan ($4.99/mo)**: Unlocks unlimited password entries AND enables cloud synchronization across devices via Google Drive/iCloud.
-- Installed and configured `@revenuecat/purchases-capacitor` to manage these subscriptions.
-- Successfully fetched the PRO and CLOUD products and displayed them in the `UpgradeModal` based on the user's active entitlement status.
-
-### 4. iOS Build Troubleshooting on Ionic Appflow
-We spent significant effort resolving complex CI/CD build failures for iOS on Appflow:
-- **The Core Issue**: Capacitor 8 defaults to using Swift Package Manager (SPM). On Appflow, SPM was failing to resolve because Xcode 14+ requires local development teams to be configured for SPM packages, which conflicted with Appflow's automated cloud signing environments.
-- **The Solution**: We migrated the iOS build dependency manager from SPM back to **CocoaPods**.
-- **Steps Taken**:
-  1. Deleted the `CapApp-SPM` directory.
-  2. Created a native `ios/App/Podfile` configured to target iOS 15.0 (required by RevenueCat).
-  3. Stripped out residual "ghost" SPM references (`XCLocalSwiftPackageReference`) directly from the `App.xcodeproj/project.pbxproj` file to stop Xcode from failing on missing packages.
-  4. Fixed a CocoaPods environment variable bug by injecting `#include? "App/Pods/Target Support Files/Pods-App/Pods-App.debug.xcconfig"` into the Capacitor `debug.xcconfig`, which allowed the final Xcode compilation step to find the `Podfile.lock`.
-  5. Pushed the correctly tracked `Podfile` to the repository so the Appflow runner could properly execute `pod install`.
-
----
-
-## 🚫 IMPORTANT REMARKS FOR FUTURE DEVELOPMENT
-- **NO MACOS DEVICE**: The developer does not use or possess a macOS device for deployment. All iOS builds MUST be carefully configured and pushed to cloud builders (like Ionic Appflow) because local Xcode testing is impossible.
-- **DO NOT** touch, modify, or break any files related to the desktop application.
-- **DO NOT** merge or push changes directly to the `main` branch of the desktop app. This repository (`PassGen-Mobile`) is strictly for the mobile adaptations and iOS/Android fixes. The desktop architecture must remain completely isolated and functional.
+### 💎 Flexible Premium Plans
+- **Free Plan**: Manage up to 4 passwords securely for free.
+- **PRO Plan**: Unlocks unlimited password entries for local storage.
+- **CLOUD Plan**: Unlocks unlimited entries AND seamless cloud synchronization features.
