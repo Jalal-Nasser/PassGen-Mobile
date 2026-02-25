@@ -80,6 +80,104 @@ private struct OnboardingPage: Identifiable {
     let systemImage: String
 }
 
+private struct WebsitePreset: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let domain: String
+    let loginURL: String
+    let description: String
+    let keywords: [String]
+}
+
+private let websitePresets: [WebsitePreset] = [
+    WebsitePreset(id: "amazon", name: "Amazon", domain: "amazon.com", loginURL: "https://www.amazon.com/ap/signin", description: "Online shopping and digital services.", keywords: ["shopping", "marketplace", "retail"]),
+    WebsitePreset(id: "dropbox", name: "Dropbox", domain: "dropbox.com", loginURL: "https://www.dropbox.com/login", description: "Cloud file storage and sync service.", keywords: ["cloud", "files", "storage"]),
+    WebsitePreset(id: "facebook", name: "Facebook", domain: "facebook.com", loginURL: "https://www.facebook.com/login", description: "Social networking platform.", keywords: ["social", "meta"]),
+    WebsitePreset(id: "gmail", name: "Gmail", domain: "gmail.com", loginURL: "https://mail.google.com", description: "Google email service.", keywords: ["email", "google", "mail"]),
+    WebsitePreset(id: "instagram", name: "Instagram", domain: "instagram.com", loginURL: "https://www.instagram.com/accounts/login/", description: "Photo and video sharing platform.", keywords: ["social", "photos", "meta"]),
+    WebsitePreset(id: "linkedin", name: "LinkedIn", domain: "linkedin.com", loginURL: "https://www.linkedin.com/login", description: "Professional networking platform.", keywords: ["jobs", "career", "social"]),
+    WebsitePreset(id: "outlook", name: "Outlook", domain: "outlook.live.com", loginURL: "https://outlook.live.com", description: "Microsoft email and productivity account.", keywords: ["email", "microsoft", "mail"]),
+    WebsitePreset(id: "pinterest", name: "Pinterest", domain: "pinterest.com", loginURL: "https://www.pinterest.com/login/", description: "Image discovery and bookmarking platform.", keywords: ["social", "images", "ideas"]),
+    WebsitePreset(id: "reddit", name: "Reddit", domain: "reddit.com", loginURL: "https://www.reddit.com/login/", description: "Community discussion platform.", keywords: ["forum", "community", "social"]),
+    WebsitePreset(id: "twitter", name: "Twitter", domain: "twitter.com", loginURL: "https://x.com/i/flow/login", description: "Social network now known as X.", keywords: ["x", "social"]),
+    WebsitePreset(id: "x", name: "X", domain: "x.com", loginURL: "https://x.com/i/flow/login", description: "Social network formerly known as Twitter.", keywords: ["twitter", "social"]),
+    WebsitePreset(id: "yahoo", name: "Yahoo", domain: "yahoo.com", loginURL: "https://login.yahoo.com", description: "Email, news, and web portal services.", keywords: ["mail", "email", "portal"]),
+    WebsitePreset(id: "zoho", name: "Zoho", domain: "zoho.com", loginURL: "https://accounts.zoho.com/signin", description: "Business software and productivity suite.", keywords: ["crm", "business", "productivity"]),
+    WebsitePreset(id: "github", name: "GitHub", domain: "github.com", loginURL: "https://github.com/login", description: "Code hosting and developer collaboration.", keywords: ["git", "code", "developer"]),
+    WebsitePreset(id: "gitlab", name: "GitLab", domain: "gitlab.com", loginURL: "https://gitlab.com/users/sign_in", description: "DevOps platform and code collaboration.", keywords: ["git", "code", "ci"]),
+    WebsitePreset(id: "stackoverflow", name: "Stack Overflow", domain: "stackoverflow.com", loginURL: "https://stackoverflow.com/users/login", description: "Developer Q&A platform.", keywords: ["programming", "developer", "forum"]),
+    WebsitePreset(id: "google", name: "Google", domain: "google.com", loginURL: "https://accounts.google.com", description: "Google account sign-in.", keywords: ["search", "account", "gmail"]),
+    WebsitePreset(id: "microsoft", name: "Microsoft", domain: "microsoft.com", loginURL: "https://login.live.com", description: "Microsoft account services.", keywords: ["windows", "office", "account"]),
+    WebsitePreset(id: "apple", name: "Apple ID", domain: "apple.com", loginURL: "https://appleid.apple.com", description: "Apple account and iCloud access.", keywords: ["icloud", "ios", "mac"]),
+    WebsitePreset(id: "icloud", name: "iCloud", domain: "icloud.com", loginURL: "https://www.icloud.com", description: "Apple cloud services and sync.", keywords: ["apple", "cloud", "storage"]),
+    WebsitePreset(id: "onedrive", name: "OneDrive", domain: "onedrive.live.com", loginURL: "https://onedrive.live.com", description: "Microsoft cloud storage service.", keywords: ["cloud", "files", "microsoft"]),
+    WebsitePreset(id: "googledrive", name: "Google Drive", domain: "drive.google.com", loginURL: "https://drive.google.com", description: "Google cloud file storage.", keywords: ["cloud", "files", "google"]),
+    WebsitePreset(id: "discord", name: "Discord", domain: "discord.com", loginURL: "https://discord.com/login", description: "Community chat and voice platform.", keywords: ["chat", "community", "gaming"]),
+    WebsitePreset(id: "slack", name: "Slack", domain: "slack.com", loginURL: "https://slack.com/signin", description: "Team messaging and collaboration.", keywords: ["work", "chat", "team"]),
+    WebsitePreset(id: "notion", name: "Notion", domain: "notion.so", loginURL: "https://www.notion.so/login", description: "Workspace for notes and docs.", keywords: ["notes", "workspace", "productivity"]),
+    WebsitePreset(id: "trello", name: "Trello", domain: "trello.com", loginURL: "https://trello.com/login", description: "Project boards and task tracking.", keywords: ["project", "kanban", "tasks"]),
+    WebsitePreset(id: "asana", name: "Asana", domain: "asana.com", loginURL: "https://app.asana.com/-/login", description: "Work and project management platform.", keywords: ["project", "tasks", "team"]),
+    WebsitePreset(id: "canva", name: "Canva", domain: "canva.com", loginURL: "https://www.canva.com/login", description: "Design and content creation platform.", keywords: ["design", "graphics", "creative"]),
+    WebsitePreset(id: "figma", name: "Figma", domain: "figma.com", loginURL: "https://www.figma.com/login", description: "Collaborative design and prototyping.", keywords: ["design", "ui", "ux"]),
+    WebsitePreset(id: "adobe", name: "Adobe", domain: "adobe.com", loginURL: "https://account.adobe.com", description: "Creative cloud and Adobe services.", keywords: ["creative", "design", "photoshop"]),
+    WebsitePreset(id: "paypal", name: "PayPal", domain: "paypal.com", loginURL: "https://www.paypal.com/signin", description: "Online payments and transfers.", keywords: ["payments", "finance", "wallet"]),
+    WebsitePreset(id: "ebay", name: "eBay", domain: "ebay.com", loginURL: "https://signin.ebay.com", description: "Online auctions and marketplace.", keywords: ["shopping", "marketplace"]),
+    WebsitePreset(id: "netflix", name: "Netflix", domain: "netflix.com", loginURL: "https://www.netflix.com/login", description: "Streaming entertainment platform.", keywords: ["streaming", "video"]),
+    WebsitePreset(id: "spotify", name: "Spotify", domain: "spotify.com", loginURL: "https://accounts.spotify.com/login", description: "Music and podcast streaming.", keywords: ["music", "audio", "streaming"]),
+    WebsitePreset(id: "youtube", name: "YouTube", domain: "youtube.com", loginURL: "https://accounts.google.com", description: "Video sharing and streaming service.", keywords: ["video", "google", "streaming"]),
+    WebsitePreset(id: "twitch", name: "Twitch", domain: "twitch.tv", loginURL: "https://www.twitch.tv/login", description: "Live streaming platform.", keywords: ["streaming", "gaming", "live"]),
+    WebsitePreset(id: "tiktok", name: "TikTok", domain: "tiktok.com", loginURL: "https://www.tiktok.com/login", description: "Short-form video social platform.", keywords: ["video", "social"]),
+    WebsitePreset(id: "snapchat", name: "Snapchat", domain: "snapchat.com", loginURL: "https://accounts.snapchat.com", description: "Messaging and social media app.", keywords: ["chat", "social", "stories"]),
+    WebsitePreset(id: "medium", name: "Medium", domain: "medium.com", loginURL: "https://medium.com/m/signin", description: "Publishing and blogging platform.", keywords: ["writing", "blog", "articles"]),
+    WebsitePreset(id: "quora", name: "Quora", domain: "quora.com", loginURL: "https://www.quora.com", description: "Question and answer platform.", keywords: ["q&a", "community", "answers"]),
+    WebsitePreset(id: "tumblr", name: "Tumblr", domain: "tumblr.com", loginURL: "https://www.tumblr.com/login", description: "Microblogging social platform.", keywords: ["blog", "social"]),
+    WebsitePreset(id: "steam", name: "Steam", domain: "steampowered.com", loginURL: "https://store.steampowered.com/login", description: "PC game store and community.", keywords: ["gaming", "games", "pc"]),
+    WebsitePreset(id: "epic", name: "Epic Games", domain: "epicgames.com", loginURL: "https://www.epicgames.com/id/login", description: "Game store and account platform.", keywords: ["gaming", "fortnite", "games"]),
+    WebsitePreset(id: "playstation", name: "PlayStation", domain: "playstation.com", loginURL: "https://my.account.sony.com", description: "PlayStation network account services.", keywords: ["gaming", "sony", "psn"]),
+    WebsitePreset(id: "nintendo", name: "Nintendo", domain: "nintendo.com", loginURL: "https://accounts.nintendo.com", description: "Nintendo account services.", keywords: ["gaming", "switch"]),
+    WebsitePreset(id: "airbnb", name: "Airbnb", domain: "airbnb.com", loginURL: "https://www.airbnb.com/login", description: "Travel stays and hosting platform.", keywords: ["travel", "booking", "stays"]),
+    WebsitePreset(id: "booking", name: "Booking.com", domain: "booking.com", loginURL: "https://account.booking.com/sign-in", description: "Hotel and accommodation booking.", keywords: ["travel", "hotel", "booking"]),
+    WebsitePreset(id: "uber", name: "Uber", domain: "uber.com", loginURL: "https://auth.uber.com", description: "Ride-hailing and delivery services.", keywords: ["rides", "transport"]),
+    WebsitePreset(id: "lyft", name: "Lyft", domain: "lyft.com", loginURL: "https://account.lyft.com/auth", description: "Ride-hailing service platform.", keywords: ["rides", "transport"]),
+    WebsitePreset(id: "doordash", name: "DoorDash", domain: "doordash.com", loginURL: "https://www.doordash.com/consumer/login", description: "Food delivery platform.", keywords: ["delivery", "food"]),
+    WebsitePreset(id: "uber_eats", name: "Uber Eats", domain: "ubereats.com", loginURL: "https://www.ubereats.com/login", description: "Food delivery by Uber.", keywords: ["delivery", "food"]),
+    WebsitePreset(id: "robinhood", name: "Robinhood", domain: "robinhood.com", loginURL: "https://robinhood.com/login", description: "Investing and brokerage platform.", keywords: ["finance", "stocks", "investing"]),
+    WebsitePreset(id: "coinbase", name: "Coinbase", domain: "coinbase.com", loginURL: "https://www.coinbase.com/signin", description: "Cryptocurrency exchange platform.", keywords: ["crypto", "finance", "exchange"]),
+    WebsitePreset(id: "binance", name: "Binance", domain: "binance.com", loginURL: "https://accounts.binance.com", description: "Cryptocurrency exchange.", keywords: ["crypto", "exchange", "finance"]),
+    WebsitePreset(id: "chase", name: "Chase", domain: "chase.com", loginURL: "https://secure.chase.com", description: "Banking and credit card accounts.", keywords: ["bank", "finance", "cards"]),
+    WebsitePreset(id: "bankofamerica", name: "Bank of America", domain: "bankofamerica.com", loginURL: "https://secure.bankofamerica.com", description: "Online banking and account access.", keywords: ["bank", "finance"]),
+    WebsitePreset(id: "wellsfargo", name: "Wells Fargo", domain: "wellsfargo.com", loginURL: "https://connect.secure.wellsfargo.com", description: "Banking and loan services.", keywords: ["bank", "finance"]),
+    WebsitePreset(id: "capitalone", name: "Capital One", domain: "capitalone.com", loginURL: "https://verified.capitalone.com/sign-in", description: "Banking and credit accounts.", keywords: ["bank", "finance", "cards"]),
+    WebsitePreset(id: "americanexpress", name: "American Express", domain: "americanexpress.com", loginURL: "https://www.americanexpress.com/en-us/account/login", description: "Credit card and financial services.", keywords: ["cards", "finance"]),
+    WebsitePreset(id: "aws", name: "AWS", domain: "aws.amazon.com", loginURL: "https://signin.aws.amazon.com", description: "Amazon cloud platform account.", keywords: ["cloud", "developer", "infra"]),
+    WebsitePreset(id: "cloudflare", name: "Cloudflare", domain: "cloudflare.com", loginURL: "https://dash.cloudflare.com/login", description: "Web performance and security platform.", keywords: ["dns", "security", "cloud"]),
+    WebsitePreset(id: "digitalocean", name: "DigitalOcean", domain: "digitalocean.com", loginURL: "https://cloud.digitalocean.com/login", description: "Cloud infrastructure provider.", keywords: ["cloud", "infra", "developer"]),
+    WebsitePreset(id: "heroku", name: "Heroku", domain: "heroku.com", loginURL: "https://id.heroku.com/login", description: "Cloud app platform for deployment.", keywords: ["cloud", "developer", "hosting"]),
+    WebsitePreset(id: "vercel", name: "Vercel", domain: "vercel.com", loginURL: "https://vercel.com/login", description: "Frontend cloud deployment platform.", keywords: ["hosting", "frontend", "developer"]),
+    WebsitePreset(id: "netlify", name: "Netlify", domain: "netlify.com", loginURL: "https://app.netlify.com/login", description: "Web deployment and hosting service.", keywords: ["hosting", "web", "developer"]),
+    WebsitePreset(id: "proton", name: "Proton Mail", domain: "proton.me", loginURL: "https://mail.proton.me", description: "Encrypted email and privacy services.", keywords: ["email", "privacy", "mail"]),
+    WebsitePreset(id: "telegram", name: "Telegram", domain: "telegram.org", loginURL: "https://web.telegram.org", description: "Messaging platform with cloud sync.", keywords: ["chat", "messaging"]),
+    WebsitePreset(id: "whatsapp", name: "WhatsApp", domain: "whatsapp.com", loginURL: "https://web.whatsapp.com", description: "Messaging platform by Meta.", keywords: ["chat", "messaging", "social"]),
+    WebsitePreset(id: "shopify", name: "Shopify", domain: "shopify.com", loginURL: "https://accounts.shopify.com/store-login", description: "E-commerce platform and merchant tools.", keywords: ["ecommerce", "store", "business"]),
+    WebsitePreset(id: "salesforce", name: "Salesforce", domain: "salesforce.com", loginURL: "https://login.salesforce.com", description: "CRM and business platform.", keywords: ["crm", "business", "sales"]),
+    WebsitePreset(id: "atlassian", name: "Atlassian", domain: "atlassian.com", loginURL: "https://id.atlassian.com/login", description: "Jira, Confluence, and team tools.", keywords: ["jira", "confluence", "work"])
+]
+
+private func normalizedDomain(from rawURL: String) -> String? {
+    let trimmed = rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+
+    if let directURL = URL(string: trimmed), let host = directURL.host {
+        return host.replacingOccurrences(of: "www.", with: "")
+    }
+
+    if let prefixed = URL(string: "https://\(trimmed)"), let host = prefixed.host {
+        return host.replacingOccurrences(of: "www.", with: "")
+    }
+
+    return nil
+}
+
 private struct AlertState: Identifiable {
     let id = UUID()
     let message: String
@@ -92,6 +190,9 @@ private struct VaultEntry: Codable, Identifiable, Hashable {
     var password: String
     var url: String
     var notes: String
+    var websitePresetId: String?
+    var websiteDomain: String?
+    var websiteDescription: String?
     var createdAt: Date
     var updatedAt: Date
 }
@@ -103,6 +204,9 @@ private struct VaultEntryDraft {
     var password: String
     var url: String
     var notes: String
+    var websitePresetId: String?
+    var websiteDomain: String?
+    var websiteDescription: String?
     var createdAt: Date?
 
     static let empty = VaultEntryDraft(
@@ -112,6 +216,9 @@ private struct VaultEntryDraft {
         password: "",
         url: "",
         notes: "",
+        websitePresetId: nil,
+        websiteDomain: nil,
+        websiteDescription: nil,
         createdAt: nil
     )
 
@@ -122,6 +229,9 @@ private struct VaultEntryDraft {
         self.password = entry.password
         self.url = entry.url
         self.notes = entry.notes
+        self.websitePresetId = entry.websitePresetId
+        self.websiteDomain = entry.websiteDomain
+        self.websiteDescription = entry.websiteDescription
         self.createdAt = entry.createdAt
     }
 
@@ -132,6 +242,9 @@ private struct VaultEntryDraft {
         password: String,
         url: String,
         notes: String,
+        websitePresetId: String?,
+        websiteDomain: String?,
+        websiteDescription: String?,
         createdAt: Date?
     ) {
         self.id = id
@@ -140,6 +253,9 @@ private struct VaultEntryDraft {
         self.password = password
         self.url = url
         self.notes = notes
+        self.websitePresetId = websitePresetId
+        self.websiteDomain = websiteDomain
+        self.websiteDescription = websiteDescription
         self.createdAt = createdAt
     }
 
@@ -151,6 +267,9 @@ private struct VaultEntryDraft {
             password: password,
             url: url.trimmingCharacters(in: .whitespacesAndNewlines),
             notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
+            websitePresetId: websitePresetId,
+            websiteDomain: websiteDomain,
+            websiteDescription: websiteDescription,
             createdAt: createdAt ?? now,
             updatedAt: now
         )
@@ -451,6 +570,8 @@ private final class NativeVaultViewModel: ObservableObject {
     @Published var entries: [VaultEntry] = []
     @Published var alertState: AlertState?
     @Published var showEditorSheet = false
+    @Published var showWebsitePicker = false
+    @Published var websiteQuery = ""
     @Published var draft = VaultEntryDraft.empty
     @Published var showResetPrompt = false
     @Published var showPlanSheet = false
@@ -500,12 +621,32 @@ private final class NativeVaultViewModel: ObservableObject {
         4
     }
 
+    var selectedWebsiteName: String {
+        if let presetID = draft.websitePresetId,
+           let preset = websitePresets.first(where: { $0.id == presetID }) {
+            return preset.name
+        }
+        return draft.name
+    }
+
+    var filteredWebsitePresets: [WebsitePreset] {
+        let query = websiteQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return websitePresets }
+
+        return websitePresets.filter { preset in
+            if preset.name.lowercased().contains(query) { return true }
+            if preset.domain.lowercased().contains(query) { return true }
+            if preset.keywords.contains(where: { $0.lowercased().contains(query) }) { return true }
+            return false
+        }
+    }
+
     var filteredEntries: [VaultEntry] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !query.isEmpty else { return entries }
 
         return entries.filter { entry in
-            [entry.name, entry.username, entry.url, entry.notes]
+            [entry.name, entry.username, entry.url, entry.notes, entry.websiteDomain ?? "", entry.websiteDescription ?? ""]
                 .joined(separator: " ")
                 .lowercased()
                 .contains(query)
@@ -588,6 +729,25 @@ private final class NativeVaultViewModel: ObservableObject {
         }
     }
 
+    func openWebsitePicker() {
+        websiteQuery = ""
+        showWebsitePicker = true
+    }
+
+    func applyWebsitePreset(_ preset: WebsitePreset) {
+        draft.websitePresetId = preset.id
+        draft.websiteDomain = preset.domain
+        draft.websiteDescription = preset.description
+        draft.name = preset.name
+
+        let currentURL = draft.url.trimmingCharacters(in: .whitespacesAndNewlines)
+        if currentURL.isEmpty || normalizedDomain(from: currentURL) == draft.websiteDomain {
+            draft.url = preset.loginURL
+        }
+
+        showWebsitePicker = false
+    }
+
     func startCreateEntry(seedPassword: String? = nil) {
         if selectedTier == .free && entries.count >= freePlanLimit {
             alertState = AlertState(message: "Free plan allows up to 4 passwords. Upgrade to PRO for unlimited entries.")
@@ -595,6 +755,8 @@ private final class NativeVaultViewModel: ObservableObject {
             return
         }
         draft = .empty
+        websiteQuery = ""
+        showWebsitePicker = false
         if let seedPassword {
             draft.password = seedPassword
         }
@@ -603,6 +765,8 @@ private final class NativeVaultViewModel: ObservableObject {
 
     func startEditEntry(_ entry: VaultEntry) {
         draft = VaultEntryDraft(entry: entry)
+        websiteQuery = ""
+        showWebsitePicker = false
         showEditorSheet = true
     }
 
@@ -626,6 +790,12 @@ private final class NativeVaultViewModel: ObservableObject {
         }
 
         do {
+            let parsedDomain = normalizedDomain(from: draft.url)
+            if let parsedDomain {
+                draft.websiteDomain = parsedDomain
+            } else if (draft.websiteDomain ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                draft.websiteDomain = nil
+            }
             let entry = draft.toEntry(now: Date())
             try store.upsert(entry: entry)
             refreshEntries()
@@ -713,6 +883,8 @@ private final class NativeVaultViewModel: ObservableObject {
             entries = []
             draft = .empty
             showEditorSheet = false
+            showWebsitePicker = false
+            websiteQuery = ""
             showPlanSheet = false
             activeTab = .vault
             selectedTier = .free
@@ -1034,20 +1206,29 @@ private struct NativeVaultTabView: View {
                 }
 
                 ForEach(viewModel.filteredEntries) { entry in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(entry.name)
-                            .font(.system(size: 17, weight: .semibold))
+                    HStack(spacing: 12) {
+                        WebsiteBrandIconView(
+                            domain: entry.websiteDomain ?? normalizedDomain(from: entry.url),
+                            title: entry.name,
+                            size: 42
+                        )
 
-                        if !entry.username.isEmpty {
-                            Text(entry.username)
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.secondary)
-                        }
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(entry.name)
+                                .font(.system(size: 17, weight: .semibold))
 
-                        if !entry.url.isEmpty {
-                            Text(entry.url)
-                                .font(.system(size: 13, weight: .regular))
-                                .foregroundColor(.secondary)
+                            if !entry.username.isEmpty {
+                                Text(entry.username)
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(.secondary)
+                            }
+
+                            if !entry.url.isEmpty {
+                                Text(entry.url)
+                                    .font(.system(size: 13, weight: .regular))
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
                         }
                     }
                     .padding(.vertical, 4)
@@ -1204,39 +1385,133 @@ private struct NativeSettingsTabView: View {
 private struct NativeEntryEditorView: View {
     @ObservedObject var viewModel: NativeVaultViewModel
     @Environment(\.dismiss) private var dismiss
+    @State private var showPassword = false
+
+    private var entryTitle: String {
+        viewModel.draft.id == nil ? "Add Website" : "Edit Website"
+    }
+
+    private var selectedDomain: String? {
+        normalizedDomain(from: viewModel.draft.url) ?? viewModel.draft.websiteDomain
+    }
+
+    private var selectedDescription: String {
+        let directDescription = (viewModel.draft.websiteDescription ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !directDescription.isEmpty {
+            return directDescription
+        }
+
+        if let presetID = viewModel.draft.websitePresetId,
+           let preset = websitePresets.first(where: { $0.id == presetID }) {
+            return preset.description
+        }
+
+        return ""
+    }
 
     var body: some View {
         NavigationView {
             Form {
-                Section("Entry") {
-                    TextField("Name", text: $viewModel.draft.name)
+                Section {
+                    Button {
+                        viewModel.openWebsitePicker()
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "globe")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundColor(Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
+                            Text(viewModel.draft.websitePresetId == nil ? "Add Website" : "Change Website")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+
+                if viewModel.draft.websitePresetId != nil || !selectedDescription.isEmpty || selectedDomain != nil {
+                    Section("Account Name") {
+                        HStack(spacing: 12) {
+                            WebsiteBrandIconView(
+                                domain: selectedDomain,
+                                title: viewModel.selectedWebsiteName,
+                                size: 40
+                            )
+                            Text(viewModel.selectedWebsiteName)
+                                .font(.system(size: 18, weight: .bold))
+                        }
+
+                        TextField("Account name", text: $viewModel.draft.name)
+                    }
+                } else {
+                    Section("Account Name") {
+                        TextField("Account name", text: $viewModel.draft.name)
+                    }
+                }
+
+                if !selectedDescription.isEmpty {
+                    Section("Description") {
+                        Text(selectedDescription)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 24 / 255, green: 28 / 255, blue: 48 / 255))
+                    }
+                }
+
+                Section("Credentials") {
                     TextField("Username", text: $viewModel.draft.username)
 
-                    SecureField("Password", text: $viewModel.draft.password)
+                    HStack(spacing: 10) {
+                        Group {
+                            if showPassword {
+                                TextField("Password", text: $viewModel.draft.password)
+                            } else {
+                                SecureField("Password", text: $viewModel.draft.password)
+                            }
+                        }
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled(true)
 
-                    Button("Generate Password") {
-                        viewModel.draft.password = viewModel.generatePassword()
+                        Button {
+                            showPassword.toggle()
+                        } label: {
+                            Image(systemName: showPassword ? "eye.slash" : "eye")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.secondary)
+                        }
+
+                        Button {
+                            viewModel.draft.password = viewModel.generatePassword()
+                        } label: {
+                            Image(systemName: "key.fill")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
+                        }
                     }
+                }
 
+                Section("Website URL") {
                     TextField("URL", text: $viewModel.draft.url)
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled(true)
+                }
 
+                Section("Notes") {
                     TextEditor(text: $viewModel.draft.notes)
                         .frame(minHeight: 120)
                 }
             }
-            .navigationTitle(viewModel.draft.id == nil ? "New Entry" : "Edit Entry")
+            .navigationTitle(entryTitle)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
+                    Button("Close") {
                         dismiss()
                     }
                 }
 
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Save") {
+                    Button("Done") {
                         if viewModel.saveDraftEntry() {
                             dismiss()
                         }
@@ -1246,6 +1521,186 @@ private struct NativeEntryEditorView: View {
             }
         }
         .navigationViewStyle(.stack)
+        .sheet(isPresented: $viewModel.showWebsitePicker) {
+            NativeWebsitePickerView(viewModel: viewModel)
+        }
+    }
+}
+
+private struct NativeWebsitePickerView: View {
+    @ObservedObject var viewModel: NativeVaultViewModel
+    @Environment(\.dismiss) private var dismiss
+    @FocusState private var searchFocused: Bool
+
+    private let columns = [
+        GridItem(.flexible(), spacing: 14),
+        GridItem(.flexible(), spacing: 14),
+        GridItem(.flexible(), spacing: 14),
+        GridItem(.flexible(), spacing: 14)
+    ]
+
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundColor(.secondary)
+                        TextField("Search 300+ websites", text: $viewModel.websiteQuery)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled(true)
+                            .focused($searchFocused)
+                    }
+                    .padding(12)
+                    .background(Color(UIColor.secondarySystemBackground))
+                    .cornerRadius(16)
+
+                    Text("Popular Websites:")
+                        .font(.system(size: 18, weight: .semibold))
+
+                    if viewModel.filteredWebsitePresets.isEmpty {
+                        Text("No websites found for your search.")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.secondary)
+                    } else {
+                        LazyVGrid(columns: columns, spacing: 18) {
+                            ForEach(viewModel.filteredWebsitePresets) { preset in
+                                Button {
+                                    viewModel.applyWebsitePreset(preset)
+                                    dismiss()
+                                } label: {
+                                    VStack(spacing: 8) {
+                                        WebsiteBrandIconView(domain: preset.domain, title: preset.name, size: 54)
+                                        Text(preset.name)
+                                            .font(.system(size: 12, weight: .medium))
+                                            .foregroundColor(.primary)
+                                            .multilineTextAlignment(.center)
+                                            .lineLimit(2)
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 16)
+            }
+            .background(Color(UIColor.systemGroupedBackground))
+            .navigationTitle("Add Website")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .bold))
+                            .padding(10)
+                            .background(Circle().fill(Color(UIColor.secondarySystemBackground)))
+                    }
+                }
+            }
+        }
+        .navigationViewStyle(.stack)
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                searchFocused = true
+            }
+        }
+    }
+}
+
+private struct WebsiteBrandIconView: View {
+    let domain: String?
+    let title: String
+    let size: CGFloat
+
+    private var primaryURL: URL? {
+        guard let domain, !domain.isEmpty else { return nil }
+        return URL(string: "https://logo.clearbit.com/\(domain)?size=128")
+    }
+
+    private var fallbackURL: URL? {
+        guard let domain, !domain.isEmpty else { return nil }
+        return URL(string: "https://icons.duckduckgo.com/ip3/\(domain).ico")
+    }
+
+    private var tertiaryURL: URL? {
+        guard let domain, !domain.isEmpty else { return nil }
+        return URL(string: "https://www.google.com/s2/favicons?domain=\(domain)&sz=128")
+    }
+
+    var body: some View {
+        ZStack {
+            if let primaryURL {
+                AsyncImage(url: primaryURL) { primaryPhase in
+                    switch primaryPhase {
+                    case .success(let image):
+                        iconImage(image)
+                    case .empty:
+                        ProgressView()
+                            .scaleEffect(0.7)
+                    case .failure:
+                        fallbackContent
+                    @unknown default:
+                        fallbackContent
+                    }
+                }
+            } else {
+                fallbackContent
+            }
+        }
+        .frame(width: size, height: size)
+        .background(Circle().fill(Color.white))
+        .overlay(Circle().stroke(Color.black.opacity(0.06), lineWidth: 0.6))
+        .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 2)
+    }
+
+    @ViewBuilder
+    private var fallbackContent: some View {
+        if let fallbackURL {
+            AsyncImage(url: fallbackURL) { fallbackPhase in
+                switch fallbackPhase {
+                case .success(let image):
+                    iconImage(image)
+                default:
+                    tertiaryContent
+                }
+            }
+        } else {
+            tertiaryContent
+        }
+    }
+
+    @ViewBuilder
+    private var tertiaryContent: some View {
+        if let tertiaryURL {
+            AsyncImage(url: tertiaryURL) { tertiaryPhase in
+                switch tertiaryPhase {
+                case .success(let image):
+                    iconImage(image)
+                default:
+                    fallbackInitial
+                }
+            }
+        } else {
+            fallbackInitial
+        }
+    }
+
+    private var fallbackInitial: some View {
+        Text(String(title.prefix(1)).uppercased())
+            .font(.system(size: size * 0.42, weight: .bold))
+            .foregroundColor(Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
+    }
+
+    private func iconImage(_ image: Image) -> some View {
+        image
+            .resizable()
+            .scaledToFit()
+            .clipShape(Circle())
     }
 }
 
