@@ -22,7 +22,8 @@
     "gen:license-keys": "node scripts/generate-license-keys.js",
     "dashboard": "node dashboard-server.js",
     "discord-bot": "node discord-bot.js",
-    "build:web": "tsc && vite build"
+    "build:web": "tsc && vite build",
+    "postinstall": "patch-package"
   },
   "keywords": [
     "password",
@@ -44,6 +45,7 @@
     "cross-env": "^7.0.3",
     "electron": "^28.0.0",
     "electron-builder": "^24.9.1",
+    "patch-package": "^8.0.1",
     "png-to-ico": "^2.1.0",
     "sharp": "^0.33.2",
     "typescript": "^5.3.3",
