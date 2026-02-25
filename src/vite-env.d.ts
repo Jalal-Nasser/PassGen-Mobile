@@ -10,10 +10,10 @@ interface ClipboardAPI {
 }
 
 declare interface Window {
-	electron: {
+	nativeBridge: {
 		clipboard: ClipboardAPI
 	}
-	electronAPI?: {
+	nativeBridgeAPI?: {
 		authLogin: (deviceId: string) => Promise<{ ok: boolean }>
 		authGetSession: () => Promise<{ email?: string; userId?: string; plan?: string; isPremium?: boolean; expiresAt?: string | null } | null>
 		authGetMe: () => Promise<{ userId: string; email: string; plan: string; isPremium: boolean; expiresAt: string | null }>

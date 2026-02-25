@@ -95,7 +95,7 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
       // Fetch session token for extension pairing
       ; (async () => {
         try {
-          const token = await (window as any).electronAPI?.getSessionToken?.()
+          const token = await (window as any).nativeBridgeAPI?.getSessionToken?.()
           if (typeof token === 'string') setSessionToken(token)
         } catch { }
       })()
@@ -131,7 +131,7 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
 
   useEffect(() => {
     if (!showCloudImport) return
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.storageProviderStatus) return
 
     setCloudImportError(null)
@@ -175,7 +175,7 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
   }, [showCloudImport, t])
 
   const loadCloudVersions = async (providerId: ProviderId) => {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.vaultListCloudVersions) return
     try {
       setIsSearchingCloud(true)
@@ -255,7 +255,7 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
     try {
       setLoading(true)
       const data = await storageManager.exportVault()
-      const api = (window as any).electronAPI
+      const api = (window as any).nativeBridgeAPI
       if (api && api.saveVaultFile) {
         const result = await api.saveVaultFile(data)
         if (result.success) {
@@ -290,7 +290,7 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
     if (!confirm(t('Importing will replace your current vault. Make sure you have a backup! Continue?'))) return
     try {
       setLoading(true)
-      const api = (window as any).electronAPI
+      const api = (window as any).nativeBridgeAPI
       let data: string
       if (api && api.openVaultFile) {
         const result = await api.openVaultFile()
@@ -420,7 +420,7 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
 
     if (!confirm(t('Importing will replace your current vault. Make sure you have a backup! Continue?'))) return
 
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.vaultImportFromCloud) {
       setCloudImportError(t('Vault backend is not available'))
       return

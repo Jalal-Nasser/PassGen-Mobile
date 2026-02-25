@@ -57,9 +57,9 @@ function TitleBar({ onResetApp, onOpenUpgrade, onCheckUpdates, onOpenTerms, isPr
       </div>
 
       <div className="title-bar-right">
-        <button className="title-btn" onClick={() => (window as any).electronAPI?.minimize?.()}>−</button>
-        <button className="title-btn" onClick={() => (window as any).electronAPI?.maximize?.()}>□</button>
-        <button className="title-btn close" onClick={() => (window as any).electronAPI?.close?.()}>✕</button>
+        <button className="title-btn" onClick={() => (window as any).nativeBridgeAPI?.minimize?.()}>−</button>
+        <button className="title-btn" onClick={() => (window as any).nativeBridgeAPI?.maximize?.()}>□</button>
+        <button className="title-btn close" onClick={() => (window as any).nativeBridgeAPI?.close?.()}>✕</button>
       </div>
     </div>
   )

@@ -6,14 +6,14 @@ export async function copyText(text: string): Promise<boolean> {
     } catch {}
   }
   try {
-    // 1) Preferred: Electron native clipboard (via preload)
-    if (typeof window !== 'undefined' && (window as any).electron?.clipboard?.writeText) {
+    // 1) Preferred: native bridge clipboard
+    if (typeof window !== 'undefined' && (window as any).nativeBridge?.clipboard?.writeText) {
       try {
-        const ok = await (window as any).electron.clipboard.writeText(text)
-        dbg(`electron.writeText -> ${ok ? 'ok' : 'fail'}`)
+        const ok = await (window as any).nativeBridge.clipboard.writeText(text)
+        dbg(`nativeBridge.writeText -> ${ok ? 'ok' : 'fail'}`)
         if (ok) return true
       } catch (e:any) {
-        dbg(`electron.writeText error: ${e?.message || e}`)
+        dbg(`nativeBridge.writeText error: ${e?.message || e}`)
       }
     }
 

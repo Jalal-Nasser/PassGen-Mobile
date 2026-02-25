@@ -31,7 +31,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
 
   useEffect(() => {
     if (!open) return
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.settingsGet) return
     api.settingsGet()
       .then((result: any) => {
@@ -44,7 +44,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
 
   useEffect(() => {
     if (!open) return
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.storageProviderStatus && !api?.vaultStatus) return
 
     const loadLocation = async () => {
@@ -87,7 +87,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   }
 
   const handleChangeVaultFolder = async () => {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.storageSelectVaultFolder || !api?.storageConfigure) {
       setVaultLocationError(t('Vault backend is not available'))
       return
@@ -180,7 +180,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
       store.setPasskeyCredential(credential.id, 'passkey-registered')
       setHasPasskey(true)
       try {
-        await (window as any).electronAPI?.passkeyStoreKey?.(store.getInstallId())
+        await (window as any).nativeBridgeAPI?.passkeyStoreKey?.(store.getInstallId())
         setPasskeyMessage(t('Passkey setup successful! You can now unlock with your biometric.'))
       } catch (error) {
         setPasskeyMessage(t('Passkey created, but unlock is not enabled on this device. {{message}}', {
@@ -200,7 +200,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   }
   const handleMinimizeToTrayChange = async (value: boolean) => {
     setMinimizeToTray(value)
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.settingsSet) return
     try {
       const result = await api.settingsSet({ minimizeToTray: value })

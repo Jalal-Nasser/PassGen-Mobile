@@ -55,7 +55,7 @@ export function applyRemoteLicense(payload: { isPremium: boolean; plan?: string;
     store.setPremium(false)
     localStorage.setItem('passgen-premium-tier', 'free')
   }
-  const api = (window as any)?.electronAPI
+  const api = (window as any)?.nativeBridgeAPI
   if (api?.emit) {
     api.emit('premium:changed')
   }

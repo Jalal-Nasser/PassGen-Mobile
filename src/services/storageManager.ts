@@ -16,7 +16,7 @@ export class StorageManager {
   private providerLabel = PROVIDER_LABELS.local
 
   async initializeEncryption(masterPassword: string): Promise<void> {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.vaultUnlock) {
       throw new Error('Vault backend is not available')
     }
@@ -27,7 +27,7 @@ export class StorageManager {
   }
 
   async initializeEncryptionWithPasskey(installId: string): Promise<void> {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.vaultUnlockWithPasskey) {
       throw new Error('Vault backend is not available')
     }
@@ -36,7 +36,7 @@ export class StorageManager {
   }
 
   async storePasskeyKey(installId: string): Promise<void> {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.passkeyStoreKey) {
       throw new Error('Vault backend is not available')
     }
@@ -44,7 +44,7 @@ export class StorageManager {
   }
 
   async initializeStorage(config: StorageConfig): Promise<void> {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.storageConfigure) {
       throw new Error('Vault backend is not available')
     }
@@ -61,49 +61,49 @@ export class StorageManager {
   }
 
   async savePasswordEntry(entry: PasswordEntry): Promise<void> {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.vaultAdd) throw new Error('Vault backend is not available')
     await api.vaultAdd(entry)
   }
 
   async updatePasswordEntry(entry: PasswordEntry): Promise<void> {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.vaultUpdate) throw new Error('Vault backend is not available')
     await api.vaultUpdate(entry)
   }
 
   async getAllPasswordEntries(): Promise<PasswordEntry[]> {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.vaultList) throw new Error('Vault backend is not available')
     return await api.vaultList()
   }
 
   async repairVault(): Promise<{ total: number; kept: number; migrated: number; removed: number }> {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.vaultRepair) throw new Error('Vault backend is not available')
     return await api.vaultRepair()
   }
 
   async exportVault(): Promise<string> {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.vaultExportEncrypted) throw new Error('Vault backend is not available')
     return await api.vaultExportEncrypted()
   }
 
   async importVault(data: string): Promise<void> {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.vaultImportEncrypted) throw new Error('Vault backend is not available')
     await api.vaultImportEncrypted(data)
   }
 
   async getVaultStatus(): Promise<{ hasVault: boolean; vaultPath: string; activeProviderId: ProviderId }> {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.vaultStatus) throw new Error('Vault backend is not available')
     return await api.vaultStatus()
   }
 
   async refreshProviderStatus(): Promise<string> {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.storageProviderStatus) return this.providerLabel
     const status = await api.storageProviderStatus()
     const label = PROVIDER_LABELS[status.activeProviderId as ProviderId] || status.activeProviderId
@@ -133,7 +133,7 @@ export class StorageManager {
   }
 
   private async migrateLegacyVault(masterPassword: string): Promise<void> {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.vaultImportLegacy) return
 
     const raw = localStorage.getItem('passgen-vault-data')

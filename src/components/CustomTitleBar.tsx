@@ -12,15 +12,15 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({ title = 'PassGen
   const { t } = useI18n()
 
   const handleMinimize = () => {
-    (window as any).electronAPI?.minimize()
+    (window as any).nativeBridgeAPI?.minimize()
   }
 
   const handleMaximize = () => {
-    (window as any).electronAPI?.maximize()
+    (window as any).nativeBridgeAPI?.maximize()
   }
 
   const handleClose = () => {
-    (window as any).electronAPI?.close()
+    (window as any).nativeBridgeAPI?.close()
   }
 
   const toggleMenu = (menu: string) => {
@@ -33,7 +33,7 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({ title = 'PassGen
 
   const sendHelpAction = (channel: string) => {
     closeMenus()
-      ; (window as any).electronAPI?.emit?.(channel)
+      ; (window as any).nativeBridgeAPI?.emit?.(channel)
   }
 
   return (

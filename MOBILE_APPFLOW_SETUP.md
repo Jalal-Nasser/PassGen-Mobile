@@ -1,6 +1,6 @@
 # PassGen Mobile Appflow Runtime Config
 
-This mobile app does **not** read desktop `.env` values for iOS runtime features.
+This mobile app does **not** read local `.env` values for iOS runtime features.
 
 ## Appflow Environment Group
 

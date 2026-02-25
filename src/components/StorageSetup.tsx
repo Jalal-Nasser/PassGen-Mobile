@@ -79,7 +79,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
   useEffect(() => {
     if (!open) return
     const loadStatus = async () => {
-      const api = (window as any).electronAPI
+      const api = (window as any).nativeBridgeAPI
       if (!api?.storageProviderStatus) return
       try {
         const status = await api.storageProviderStatus()
@@ -108,7 +108,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
 
   useEffect(() => {
     if (!open) return
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.licenseGetMe) return
 
     const refreshLicense = async () => {
@@ -140,7 +140,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
   }, [open])
 
   useEffect(() => {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.onAuthUpdated) return
     const unsubscribe = api.onAuthUpdated((session: any) => {
       setAppAccount(session)
@@ -269,7 +269,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
   }
 
   const handleSelectFolder = async () => {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.storageSelectVaultFolder) {
       alert(t('Vault backend is not available'))
       return
@@ -281,7 +281,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
   }
 
   const handleGoogleConnect = async () => {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     const connect = api?.oauthGoogleDrive || api?.storageGoogleDriveConnect
     if (!connect) {
       setGoogleError(t('Vault backend is not available'))
@@ -334,7 +334,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
   }
 
   const handleGoogleDisconnect = async () => {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.storageGoogleDriveDisconnect) {
       setGoogleError(t('Vault backend is not available'))
       return
@@ -354,7 +354,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
   }
 
   const handleOneDriveConnect = async () => {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     const connect = api?.storageOneDriveConnect
     if (!connect) {
       setOneDriveError(t('Vault backend is not available'))
@@ -407,7 +407,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
   }
 
   const handleOneDriveDisconnect = async () => {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.storageOneDriveDisconnect) {
       setOneDriveError(t('Vault backend is not available'))
       return
@@ -427,7 +427,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
   }
 
   const handleAuthLogin = async () => {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.authLogin) {
       setAuthError(t('Vault backend is not available'))
       return
@@ -447,7 +447,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
   }
 
   const handleAuthLogout = async () => {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.authLogout) {
       setAuthError(t('Vault backend is not available'))
       return
@@ -469,7 +469,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
   }
 
   const handleTestS3 = async () => {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.storageTestS3) {
       setS3TestResult(t('Vault backend is not available'))
       return
@@ -490,7 +490,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
   }
 
   const handleTestSupabase = async () => {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.storageSupabaseTest) {
       setSupabaseTestResult(t('Vault backend is not available'))
       return

@@ -138,7 +138,7 @@ async function persistVault() {
   await saveVaultFile(JSON.stringify(newVaultFile))
 }
 
-export const capacitorElectronAPI = {
+export const capacitorNativeBridgeAPI = {
   minimize: () => {},
   maximize: () => {},
   close: () => {},
@@ -215,7 +215,7 @@ export const capacitorElectronAPI = {
   getSessionToken: async () => ''
 }
 
-export const capacitorClipboard = {
+export const capacitorNativeClipboard = {
   writeText: async (text: string) => {
     await Clipboard.write({ string: text })
     return true

@@ -6,6 +6,6 @@
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true
   },
-  "include": ["vite.config.ts", "electron"],
+  "include": ["vite.config.ts"],
   "exclude": ["node_modules", "dist", "build", "supabase"]
 }

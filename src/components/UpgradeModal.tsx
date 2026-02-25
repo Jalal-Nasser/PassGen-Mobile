@@ -41,7 +41,7 @@ export default function UpgradeModal({ open, onClose }: UpgradeModalProps) {
     if (!licenseKey) { alert(t('Enter license key')); return }
     try {
       setRedeeming(true)
-      const api = (window as any).electronAPI
+      const api = (window as any).nativeBridgeAPI
       if (!api?.licenseRedeem) {
         throw new Error('License backend is not available')
       }
@@ -91,7 +91,7 @@ export default function UpgradeModal({ open, onClose }: UpgradeModalProps) {
   }
 
   const openPaymentPage = async () => {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     try {
       const paymentUrl = buildPaymentUrl()
       if (api?.openExternal) {

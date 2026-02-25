@@ -8,12 +8,12 @@ import { setupRevenueCat } from './services/revenuecat'
 setupRevenueCat()
 
 import { Capacitor } from '@capacitor/core'
-import { capacitorElectronAPI, capacitorClipboard } from './mobile/capacitorElectronAPI'
+import { capacitorNativeBridgeAPI, capacitorNativeClipboard } from './mobile/capacitorNativeBridgeAPI'
 
 if (Capacitor.isNativePlatform()) {
-  console.log('[Mobile] Injecting Capacitor Electron Polyfills...')
-    ; (window as any).electronAPI = capacitorElectronAPI
-    ; (window as any).electron = { clipboard: capacitorClipboard }
+  console.log('[Mobile] Injecting Capacitor native bridge...')
+    ; (window as any).nativeBridgeAPI = capacitorNativeBridgeAPI
+    ; (window as any).nativeBridge = { clipboard: capacitorNativeClipboard }
 }
 
 // Add error logging

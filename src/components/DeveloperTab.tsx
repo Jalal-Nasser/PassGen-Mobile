@@ -36,7 +36,7 @@ export default function DeveloperTab() {
 
   useEffect(() => {
     let cancelled = false
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     const syncLicense = async () => {
       try {
         if (!api?.licenseGetMe) return
@@ -69,7 +69,7 @@ export default function DeveloperTab() {
       setSecretGenerating(true)
       setSecretError(null)
       setSecretStatus(null)
-      const result = await (window as any).electronAPI?.devSecretGenerate?.()
+      const result = await (window as any).nativeBridgeAPI?.devSecretGenerate?.()
       if (!result?.base64Url || !result?.hex) {
         throw new Error('Secret generator unavailable')
       }
@@ -91,7 +91,7 @@ export default function DeveloperTab() {
     setSecretError(null)
     let ok = false
     try {
-      ok = await (window as any).electron?.clipboard?.writeText?.(value)
+      ok = await (window as any).nativeBridge?.clipboard?.writeText?.(value)
     } catch {
       ok = false
     }
@@ -108,7 +108,7 @@ export default function DeveloperTab() {
     try {
       setSecretError(null)
       setSecretStatus(null)
-      const result = await (window as any).electronAPI?.devSecretSelectProject?.()
+      const result = await (window as any).nativeBridgeAPI?.devSecretSelectProject?.()
       if (!result?.success || !result.folder) {
         return
       }
@@ -140,7 +140,7 @@ export default function DeveloperTab() {
         return
       }
       setSecretInjecting(true)
-      const result = await (window as any).electronAPI?.devSecretInjectEnv?.({
+      const result = await (window as any).nativeBridgeAPI?.devSecretInjectEnv?.({
         folder: secretProject.folder,
         key: keyName,
         value: secretValues.base64Url

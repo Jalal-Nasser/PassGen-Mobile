@@ -80,7 +80,7 @@ function App() {
   }, [])
 
   useEffect(() => {
-    const api = (window as any).electronAPI
+    const api = (window as any).nativeBridgeAPI
     if (!api?.licenseGetMe) return
     let cancelled = false
 
@@ -171,7 +171,7 @@ function App() {
       return
     }
     // Notify main that vault is unlocked (for extension session)
-    try { (window as any).electronAPI?.vaultUnlocked?.() } catch {}
+    try { (window as any).nativeBridgeAPI?.vaultUnlocked?.() } catch {}
     setMode('vault')
   }
 
@@ -271,7 +271,7 @@ function App() {
         try {
           await storageManager.initializeEncryptionWithPasskey(installId)
           setPasskeyNotice(null)
-          try { (window as any).electronAPI?.vaultUnlocked?.() } catch {}
+          try { (window as any).nativeBridgeAPI?.vaultUnlocked?.() } catch {}
           setMode('vault')
         } catch (e) {
           alert(t('Passkey unlock failed: {{message}}', { message: (e as Error).message }))
@@ -346,14 +346,14 @@ function App() {
     if (!proceed) return
     try {
       const cfg = new ConfigStore()
-      ;(window as any).electronAPI?.passkeyClearKey?.(cfg.getInstallId())
+      ;(window as any).nativeBridgeAPI?.passkeyClearKey?.(cfg.getInstallId())
     } catch {}
     storageManager.resetApp()
     setMasterPassword('')
     setMasterPasswordInput('')
     setShowOnboarding(true)
     setMode('onboarding')
-    // Force a clean reload to ensure all state resets consistently in Electron
+    // Force a clean reload to ensure all state resets consistently on app runtime
     setTimeout(() => {
       window.location.reload()
     }, 50)
