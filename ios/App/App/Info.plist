@@ -22,8 +22,37 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.passgen.mobile.google</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>$(IOS_GOOGLE_REVERSED_CLIENT_ID)</string>
+			</array>
+		</dict>
+	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>PassGen uses camera access to scan 2FA QR codes.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>PassGen uses Face ID to unlock your encrypted vault securely.</string>
+	<key>PassGenSupabaseURL</key>
+	<string>$(IOS_SUPABASE_URL)</string>
+	<key>PassGenSupabaseAnonKey</key>
+	<string>$(IOS_SUPABASE_ANON_KEY)</string>
+	<key>PassGenRevenueCatAPIKey</key>
+	<string>$(IOS_REVENUECAT_API_KEY)</string>
+	<key>PassGenGoogleIOSClientID</key>
+	<string>$(IOS_GOOGLE_IOS_CLIENT_ID)</string>
+	<key>PassGenGoogleReversedClientID</key>
+	<string>$(IOS_GOOGLE_REVERSED_CLIENT_ID)</string>
+	<key>PassGenGoogleServerClientID</key>
+	<string>$(IOS_GOOGLE_SERVER_CLIENT_ID)</string>
+	<key>PassGenDriveAppFolder</key>
+	<string>$(IOS_DRIVE_APP_FOLDER)</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>

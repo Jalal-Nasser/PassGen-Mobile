@@ -38,6 +38,18 @@ file_size_limit = "50MiB"
 [functions."activation-request"]
 verify_jwt = false
 
+[functions."mobile-api-keys-create"]
+verify_jwt = true
+
+[functions."mobile-api-keys-list"]
+verify_jwt = true
+
+[functions."mobile-api-keys-revoke"]
+verify_jwt = true
+
+[functions."revenuecat-webhook"]
+verify_jwt = false
+
 [analytics]
 enabled = false
 port = 54329

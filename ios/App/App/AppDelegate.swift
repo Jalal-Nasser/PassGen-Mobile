@@ -6,13 +6,460 @@ import CommonCrypto
 import UniformTypeIdentifiers
 import LocalAuthentication
 import AuthenticationServices
+import AVFoundation
+
+#if canImport(GoogleSignIn)
+import GoogleSignIn
+#endif
+
+#if canImport(RevenueCat)
+import RevenueCat
+#endif
+
+private enum MobileRuntimeConfigError: LocalizedError {
+    case missingKeys([String])
+    case invalidURL(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingKeys(let keys):
+            return "Missing iOS runtime config keys: \(keys.joined(separator: ", ")). Add them in Ionic Appflow Native Config."
+        case .invalidURL(let value):
+            return "Invalid Supabase URL in iOS runtime config: \(value)"
+        }
+    }
+}
+
+private struct MobileRuntimeConfig {
+    let supabaseURL: URL
+    let supabaseAnonKey: String
+    let revenueCatAPIKey: String
+    let googleIOSClientID: String
+    let googleReversedClientID: String
+    let googleServerClientID: String
+    let driveAppFolder: String
+
+    static func load() throws -> MobileRuntimeConfig {
+        let bundle = Bundle.main
+        let requiredKeys = [
+            "PassGenSupabaseURL",
+            "PassGenSupabaseAnonKey",
+            "PassGenRevenueCatAPIKey",
+            "PassGenGoogleIOSClientID",
+            "PassGenGoogleReversedClientID",
+            "PassGenGoogleServerClientID"
+        ]
+
+        var values: [String: String] = [:]
+        var missing: [String] = []
+
+        for key in requiredKeys {
+            let value = (bundle.object(forInfoDictionaryKey: key) as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let unresolvedVariable = value.hasPrefix("$(") && value.hasSuffix(")")
+            if value.isEmpty || unresolvedVariable || value.contains("REPLACE_ME") {
+                missing.append(key)
+            } else {
+                values[key] = value
+            }
+        }
+
+        if !missing.isEmpty {
+            throw MobileRuntimeConfigError.missingKeys(missing)
+        }
+
+        guard let supabaseURLString = values["PassGenSupabaseURL"],
+              let supabaseURL = URL(string: supabaseURLString),
+              let scheme = supabaseURL.scheme?.lowercased(),
+              ["https", "http"].contains(scheme),
+              supabaseURL.host != nil else {
+            throw MobileRuntimeConfigError.invalidURL(values["PassGenSupabaseURL"] ?? "")
+        }
+
+        let driveAppFolder = ((bundle.object(forInfoDictionaryKey: "PassGenDriveAppFolder") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? "PassGenVault"
+
+        return MobileRuntimeConfig(
+            supabaseURL: supabaseURL,
+            supabaseAnonKey: values["PassGenSupabaseAnonKey"] ?? "",
+            revenueCatAPIKey: values["PassGenRevenueCatAPIKey"] ?? "",
+            googleIOSClientID: values["PassGenGoogleIOSClientID"] ?? "",
+            googleReversedClientID: values["PassGenGoogleReversedClientID"] ?? "",
+            googleServerClientID: values["PassGenGoogleServerClientID"] ?? "",
+            driveAppFolder: driveAppFolder
+        )
+    }
+}
+
+private struct SupabaseSession: Codable {
+    let accessToken: String
+    let refreshToken: String
+    let expiresAt: Date
+    let userId: String
+    let email: String?
+
+    var isStale: Bool {
+        Date().addingTimeInterval(60) >= expiresAt
+    }
+}
+
+private struct MobileAPIKeySummary: Codable, Identifiable {
+    let id: String
+    let keyPrefix: String
+    let label: String
+    let createdAt: Date
+    let revokedAt: Date?
+
+    var isRevoked: Bool {
+        revokedAt != nil
+    }
+}
+
+private enum CloudSyncProvider: String, CaseIterable, Codable, Hashable {
+    case none
+    case icloud
+    case googleDrive
+
+    var title: String {
+        switch self {
+        case .none:
+            return "None"
+        case .icloud:
+            return "iCloud Drive"
+        case .googleDrive:
+            return "Google Drive"
+        }
+    }
+}
+
+private enum NativeAuthProvider: String {
+    case apple
+    case google
+}
+
+private enum BiometricUnlockError: LocalizedError {
+    case notAvailable(String)
+    case verificationFailed
+    case noStoredSecret
+
+    var errorDescription: String? {
+        switch self {
+        case .notAvailable(let reason):
+            return "Face ID is unavailable: \(reason)"
+        case .verificationFailed:
+            return "Face ID verification failed."
+        case .noStoredSecret:
+            return "Biometric unlock is not ready. Unlock once with your master password."
+        }
+    }
+}
+
+private enum SupabaseAuthError: LocalizedError {
+    case invalidResponse
+    case requestFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidResponse:
+            return "Supabase returned an invalid response."
+        case .requestFailed(let message):
+            return message
+        }
+    }
+}
+
+private struct SupabaseTokenResponse: Decodable {
+    let access_token: String
+    let refresh_token: String
+    let expires_in: Double
+    let user: SupabaseTokenUser
+}
+
+private struct SupabaseTokenUser: Decodable {
+    let id: String
+    let email: String?
+}
+
+private struct SupabaseErrorResponse: Decodable {
+    let error: String?
+    let error_description: String?
+    let message: String?
+}
+
+private struct APIKeyCreateResponse: Decodable {
+    let key: String
+    let prefix: String
+}
+
+private struct APIKeyListResponse: Decodable {
+    let keys: [MobileAPIKeySummaryDTO]
+}
+
+private struct APIKeyListItemResponse: Decodable {
+    let keys: [MobileAPIKeySummaryDTO]
+}
+
+private struct APIKeyRevocationResponse: Decodable {
+    let ok: Bool
+}
+
+private struct MobileAPIKeySummaryDTO: Decodable {
+    let id: String
+    let key_prefix: String
+    let label: String
+    let created_at: String
+    let revoked_at: String?
+}
+
+private enum NativeSessionKeychain {
+    private static let service = "com.passgen.native.ios.session"
+    private static let account = "supabase-session"
+
+    static func save(_ session: SupabaseSession) {
+        delete()
+        guard let data = try? JSONEncoder().encode(session) else { return }
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+            kSecValueData as String: data
+        ]
+        SecItemAdd(query as CFDictionary, nil)
+    }
+
+    static func read() -> SupabaseSession? {
+        var item: CFTypeRef?
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status == errSecSuccess,
+              let data = item as? Data,
+              let session = try? JSONDecoder().decode(SupabaseSession.self, from: data) else {
+            return nil
+        }
+
+        return session
+    }
+
+    static func delete() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+}
+
+private final class SupabaseAuthClient {
+    private let config: MobileRuntimeConfig
+
+    init(config: MobileRuntimeConfig) {
+        self.config = config
+    }
+
+    func signInWithIDToken(provider: NativeAuthProvider, idToken: String, nonce: String?) async throws -> SupabaseSession {
+        let endpoint = config.supabaseURL
+            .appendingPathComponent("auth/v1/token")
+            .withQueryItems([URLQueryItem(name: "grant_type", value: "id_token")])
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+
+        var payload: [String: Any] = [
+            "provider": provider.rawValue,
+            "id_token": idToken
+        ]
+        if let nonce, !nonce.isEmpty {
+            payload["nonce"] = nonce
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        return try await sendTokenRequest(request)
+    }
+
+    func refreshSession(_ session: SupabaseSession) async throws -> SupabaseSession {
+        let endpoint = config.supabaseURL
+            .appendingPathComponent("auth/v1/token")
+            .withQueryItems([URLQueryItem(name: "grant_type", value: "refresh_token")])
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["refresh_token": session.refreshToken], options: [])
+
+        return try await sendTokenRequest(request)
+    }
+
+    func createMobileAPIKey(accessToken: String, label: String) async throws -> APIKeyCreateResponse {
+        let endpoint = config.supabaseURL.appendingPathComponent("functions/v1/mobile-api-keys-create")
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["label": label], options: [])
+
+        let data = try await sendAuthorizedRequest(request)
+        return try JSONDecoder().decode(APIKeyCreateResponse.self, from: data)
+    }
+
+    func listMobileAPIKeys(accessToken: String) async throws -> [MobileAPIKeySummary] {
+        let endpoint = config.supabaseURL.appendingPathComponent("functions/v1/mobile-api-keys-list")
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        let data = try await sendAuthorizedRequest(request)
+        let response = try JSONDecoder().decode(APIKeyListResponse.self, from: data)
+        return response.keys.compactMap { dto in
+            guard let createdAt = ISO8601DateFormatter().date(from: dto.created_at) else {
+                return nil
+            }
+            let revokedAt = dto.revoked_at.flatMap { ISO8601DateFormatter().date(from: $0) }
+            return MobileAPIKeySummary(
+                id: dto.id,
+                keyPrefix: dto.key_prefix,
+                label: dto.label,
+                createdAt: createdAt,
+                revokedAt: revokedAt
+            )
+        }
+    }
+
+    func revokeMobileAPIKey(accessToken: String, keyID: String) async throws {
+        let endpoint = config.supabaseURL.appendingPathComponent("functions/v1/mobile-api-keys-revoke")
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["id": keyID], options: [])
+
+        let data = try await sendAuthorizedRequest(request)
+        _ = try JSONDecoder().decode(APIKeyRevocationResponse.self, from: data)
+    }
+
+    private func sendTokenRequest(_ request: URLRequest) async throws -> SupabaseSession {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw SupabaseAuthError.invalidResponse
+        }
+
+        guard (200...299).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode(SupabaseErrorResponse.self, from: data)).flatMap { errorResponse in
+                errorResponse.error_description ?? errorResponse.message ?? errorResponse.error
+            } ?? "Supabase auth request failed."
+            throw SupabaseAuthError.requestFailed(message)
+        }
+
+        let decoded = try JSONDecoder().decode(SupabaseTokenResponse.self, from: data)
+        return SupabaseSession(
+            accessToken: decoded.access_token,
+            refreshToken: decoded.refresh_token,
+            expiresAt: Date().addingTimeInterval(decoded.expires_in),
+            userId: decoded.user.id,
+            email: decoded.user.email
+        )
+    }
+
+    private func sendAuthorizedRequest(_ request: URLRequest) async throws -> Data {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw SupabaseAuthError.invalidResponse
+        }
+
+        guard (200...299).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode(SupabaseErrorResponse.self, from: data)).flatMap { errorResponse in
+                errorResponse.message ?? errorResponse.error_description ?? errorResponse.error
+            } ?? "Supabase request failed."
+            throw SupabaseAuthError.requestFailed(message)
+        }
+
+        return data
+    }
+}
+
+private extension URL {
+    func withQueryItems(_ items: [URLQueryItem]) -> URL {
+        guard var components = URLComponents(url: self, resolvingAgainstBaseURL: false) else {
+            return self
+        }
+        components.queryItems = items
+        return components.url ?? self
+    }
+}
+
+private func topMostViewController() -> UIViewController? {
+    let windowScene = UIApplication.shared.connectedScenes
+        .compactMap { $0 as? UIWindowScene }
+        .first { $0.activationState == .foregroundActive }
+    let root = windowScene?.windows.first(where: \.isKeyWindow)?.rootViewController
+
+    func traverse(_ controller: UIViewController?) -> UIViewController? {
+        if let nav = controller as? UINavigationController {
+            return traverse(nav.visibleViewController)
+        }
+        if let tab = controller as? UITabBarController {
+            return traverse(tab.selectedViewController)
+        }
+        if let presented = controller?.presentedViewController {
+            return traverse(presented)
+        }
+        return controller
+    }
+
+    return traverse(root)
+}
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
-    private let viewModel = NativeVaultViewModel()
+    private let runtimeConfigResult: Result<MobileRuntimeConfig, Error>
+    private let viewModel: NativeVaultViewModel
+
+    override init() {
+        let result = Result { try MobileRuntimeConfig.load() }
+        self.runtimeConfigResult = result
+        switch result {
+        case .success(let runtimeConfig):
+            self.viewModel = NativeVaultViewModel(runtimeConfig: runtimeConfig, runtimeConfigError: nil)
+        case .failure(let error):
+            self.viewModel = NativeVaultViewModel(runtimeConfig: nil, runtimeConfigError: error.localizedDescription)
+        }
+        super.init()
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+
+#if canImport(GoogleSignIn)
+        if case .success(let runtimeConfig) = runtimeConfigResult {
+            GIDSignIn.sharedInstance.configuration = GIDConfiguration(
+                clientID: runtimeConfig.googleIOSClientID,
+                serverClientID: runtimeConfig.googleServerClientID
+            )
+        }
+#endif
+
         let rootView = NativeVaultRootView(viewModel: viewModel)
         let hostingController = UIHostingController(rootView: rootView)
         hostingController.view.backgroundColor = .systemBackground
@@ -28,6 +475,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
 
         return true
+    }
+
+    @objc private func handleWillEnterForeground() {
+        viewModel.handleAppWillEnterForeground()
+    }
+
+    func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
+#if canImport(GoogleSignIn)
+        if GIDSignIn.sharedInstance.handle(url) {
+            return true
+        }
+#endif
+        return false
     }
 }
 
@@ -92,8 +552,9 @@ private enum PremiumTier: String, CaseIterable, Hashable {
         case .cloud:
             return [
                 "Everything in PRO",
-                "Import from iCloud Drive / Google Drive",
-                "Export to iCloud Drive / Google Drive"
+                "Automatic encrypted iCloud / Google Drive sync",
+                "Import encrypted backup + iCloud Passwords CSV",
+                "Export encrypted vault backups"
             ]
         }
     }
@@ -219,6 +680,12 @@ private struct VaultEntry: Codable, Identifiable, Hashable {
     var websitePresetId: String?
     var websiteDomain: String?
     var websiteDescription: String?
+    var totpSecret: String?
+    var totpIssuer: String?
+    var totpAccountName: String?
+    var totpDigits: Int?
+    var totpPeriod: Int?
+    var totpAlgorithm: String?
     var createdAt: Date
     var updatedAt: Date
 }
@@ -233,6 +700,12 @@ private struct VaultEntryDraft {
     var websitePresetId: String?
     var websiteDomain: String?
     var websiteDescription: String?
+    var totpSecret: String?
+    var totpIssuer: String?
+    var totpAccountName: String?
+    var totpDigits: Int
+    var totpPeriod: Int
+    var totpAlgorithm: String
     var createdAt: Date?
 
     static let empty = VaultEntryDraft(
@@ -245,6 +718,12 @@ private struct VaultEntryDraft {
         websitePresetId: nil,
         websiteDomain: nil,
         websiteDescription: nil,
+        totpSecret: nil,
+        totpIssuer: nil,
+        totpAccountName: nil,
+        totpDigits: 6,
+        totpPeriod: 30,
+        totpAlgorithm: "SHA1",
         createdAt: nil
     )
 
@@ -258,6 +737,12 @@ private struct VaultEntryDraft {
         self.websitePresetId = entry.websitePresetId
         self.websiteDomain = entry.websiteDomain
         self.websiteDescription = entry.websiteDescription
+        self.totpSecret = entry.totpSecret
+        self.totpIssuer = entry.totpIssuer
+        self.totpAccountName = entry.totpAccountName
+        self.totpDigits = entry.totpDigits ?? 6
+        self.totpPeriod = entry.totpPeriod ?? 30
+        self.totpAlgorithm = (entry.totpAlgorithm ?? "SHA1").uppercased()
         self.createdAt = entry.createdAt
     }
 
@@ -271,6 +756,12 @@ private struct VaultEntryDraft {
         websitePresetId: String?,
         websiteDomain: String?,
         websiteDescription: String?,
+        totpSecret: String?,
+        totpIssuer: String?,
+        totpAccountName: String?,
+        totpDigits: Int,
+        totpPeriod: Int,
+        totpAlgorithm: String,
         createdAt: Date?
     ) {
         self.id = id
@@ -282,6 +773,12 @@ private struct VaultEntryDraft {
         self.websitePresetId = websitePresetId
         self.websiteDomain = websiteDomain
         self.websiteDescription = websiteDescription
+        self.totpSecret = totpSecret
+        self.totpIssuer = totpIssuer
+        self.totpAccountName = totpAccountName
+        self.totpDigits = totpDigits
+        self.totpPeriod = totpPeriod
+        self.totpAlgorithm = totpAlgorithm
         self.createdAt = createdAt
     }
 
@@ -296,6 +793,12 @@ private struct VaultEntryDraft {
             websitePresetId: websitePresetId,
             websiteDomain: websiteDomain,
             websiteDescription: websiteDescription,
+            totpSecret: totpSecret?.trimmingCharacters(in: .whitespacesAndNewlines),
+            totpIssuer: totpIssuer?.trimmingCharacters(in: .whitespacesAndNewlines),
+            totpAccountName: totpAccountName?.trimmingCharacters(in: .whitespacesAndNewlines),
+            totpDigits: max(6, min(8, totpDigits)),
+            totpPeriod: max(15, min(60, totpPeriod)),
+            totpAlgorithm: totpAlgorithm.uppercased(),
             createdAt: createdAt ?? now,
             updatedAt: now
         )
@@ -312,7 +815,8 @@ private struct VaultBackupPayload: Codable {
     var version: Int
     var exportedAt: Date
     var source: String
-    var entries: [VaultEntry]
+    var encryptedBlobBase64: String?
+    var entries: [VaultEntry]?
 }
 
 private extension UTType {
@@ -348,6 +852,7 @@ private struct VaultBackupDocument: FileDocument {
                 version: 1,
                 exportedAt: Date(),
                 source: "legacy",
+                encryptedBlobBase64: nil,
                 entries: entries
             )
             return
@@ -389,7 +894,7 @@ private enum NativeKeychain {
         guard let accessControl = SecAccessControlCreateWithFlags(
             nil,
             kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-            .userPresence,
+            .biometryCurrentSet,
             nil
         ) else { return }
 
@@ -406,14 +911,42 @@ private enum NativeKeychain {
         SecItemAdd(query as CFDictionary, nil)
     }
 
-    static func readMasterPassword(prompt: String) -> String? {
+    static func evaluateBiometricAndReadPassword(prompt: String, completion: @escaping (Result<String, BiometricUnlockError>) -> Void) {
+        let context = LAContext()
+        context.localizedFallbackTitle = ""
+        context.localizedCancelTitle = "Use Master Password"
+
+        var error: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
+            let reason = error?.localizedDescription ?? "Biometric authentication is not set up."
+            completion(.failure(.notAvailable(reason)))
+            return
+        }
+
+        context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: prompt) { success, _ in
+            guard success else {
+                completion(.failure(.verificationFailed))
+                return
+            }
+
+            guard let password = readMasterPassword(using: context) else {
+                completion(.failure(.noStoredSecret))
+                return
+            }
+
+            completion(.success(password))
+        }
+    }
+
+    private static func readMasterPassword(using context: LAContext) -> String? {
         var item: CFTypeRef?
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
-            kSecUseOperationPrompt as String: prompt
+            kSecUseAuthenticationContext as String: context,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail
         ]
 
         let status = SecItemCopyMatching(query as CFDictionary, &item)
@@ -492,8 +1025,31 @@ private final class NativeVaultStore {
         self.vaultURL = folder.appendingPathComponent("passgen-vault.pgvault")
     }
 
+    var encryptedVaultFileURL: URL {
+        vaultURL
+    }
+
     func hasVault() -> Bool {
         FileManager.default.fileExists(atPath: vaultURL.path)
+    }
+
+    func exportEncryptedBlob() throws -> Data {
+        guard hasVault() else {
+            throw VaultStoreError.invalidVault
+        }
+        return try Data(contentsOf: vaultURL)
+    }
+
+    func importEncryptedBlob(_ data: Data) throws {
+        guard !data.isEmpty else {
+            throw VaultStoreError.invalidVault
+        }
+        try data.write(to: vaultURL, options: .atomic)
+        lock()
+    }
+
+    func vaultModifiedAt() -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: vaultURL.path)[.modificationDate] as? Date) ?? nil
     }
 
     func unlock(password: String) throws {
@@ -715,6 +1271,7 @@ private final class NativeVaultStore {
     }
 }
 
+@MainActor
 private final class NativeVaultViewModel: ObservableObject {
     @Published var isBooting = true
     @Published var showOnboarding = false
@@ -739,7 +1296,14 @@ private final class NativeVaultViewModel: ObservableObject {
     @Published var passkeyUnlockEnabled = false
     @Published var authProviderLabel = "Not Connected"
     @Published var authEmail = ""
+    @Published var authBusy = false
+    @Published var runtimeConfigIssue: String?
+    @Published var cloudSyncProvider: CloudSyncProvider = .none
+    @Published var cloudSyncStatus = "Cloud sync disabled"
+    @Published var lastCloudSyncAt: Date?
+    @Published var planBusy = false
     @Published var developerAPIKey = ""
+    @Published var apiKeySummaries: [MobileAPIKeySummary] = []
     @Published var selectedDeveloperTarget = "Vercel"
 
     @Published var generatedPassword = ""
@@ -756,7 +1320,14 @@ private final class NativeVaultViewModel: ObservableObject {
     private let authProviderStorageKey = "passgen-auth-provider-native"
     private let authEmailStorageKey = "passgen-auth-email-native"
     private let developerAPIKeyStorageKey = "passgen-dev-api-key-native"
+    private let cloudProviderStorageKey = "passgen-cloud-provider-native"
+    private let cloudSyncAtStorageKey = "passgen-cloud-sync-at-native"
     private let store = NativeVaultStore()
+    private let runtimeConfig: MobileRuntimeConfig?
+    private let authClient: SupabaseAuthClient?
+    private var session: SupabaseSession?
+    private var cloudSyncTimer: Timer?
+    private var cloudSyncInFlight = false
     private var lastSuccessfulPassword = ""
     private let onboardingPagesData: [OnboardingPage] = [
         OnboardingPage(
@@ -779,7 +1350,10 @@ private final class NativeVaultViewModel: ObservableObject {
         )
     ]
 
-    init() {
+    init(runtimeConfig: MobileRuntimeConfig?, runtimeConfigError: String?) {
+        self.runtimeConfig = runtimeConfig
+        self.authClient = runtimeConfig.map { SupabaseAuthClient(config: $0) }
+        self.runtimeConfigIssue = runtimeConfigError
         bootstrap()
     }
 
@@ -804,9 +1378,10 @@ private final class NativeVaultViewModel: ObservableObject {
     }
 
     var developerAPISnippet: String {
+        let baseURL = runtimeConfig?.supabaseURL.absoluteString ?? "https://<your-project>.supabase.co"
         """
         const PASSGEN_API_KEY = "\(developerAPIKey)";
-        const PASSGEN_BACKUP_ENDPOINT = "https://api.passgen.app/v1/vault/backup";
+        const PASSGEN_API_BASE = "\(baseURL)/functions/v1";
         // Use this key from \(selectedDeveloperTarget) with HTTPS requests.
         """
     }
@@ -857,7 +1432,27 @@ private final class NativeVaultViewModel: ObservableObject {
         authProviderLabel = UserDefaults.standard.string(forKey: authProviderStorageKey) ?? "Not Connected"
         authEmail = UserDefaults.standard.string(forKey: authEmailStorageKey) ?? ""
         developerAPIKey = UserDefaults.standard.string(forKey: developerAPIKeyStorageKey) ?? ""
+        if let providerRaw = UserDefaults.standard.string(forKey: cloudProviderStorageKey),
+           let provider = CloudSyncProvider(rawValue: providerRaw) {
+            cloudSyncProvider = provider
+        } else {
+            cloudSyncProvider = .none
+        }
+        if let date = UserDefaults.standard.object(forKey: cloudSyncAtStorageKey) as? Date {
+            lastCloudSyncAt = date
+        }
+        session = NativeSessionKeychain.read()
+        if let session = session {
+            authEmail = session.email ?? authEmail
+            if authProviderLabel == "Not Connected" {
+                authProviderLabel = "Supabase"
+            }
+        }
         generatedPassword = generatePassword()
+
+        refreshSupabaseSessionIfNeeded()
+        refreshTierFromRevenueCat()
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
             self?.isBooting = false
         }
@@ -878,8 +1473,13 @@ private final class NativeVaultViewModel: ObservableObject {
     }
 
     func setTier(_ tier: PremiumTier) {
-        selectedTier = tier
-        UserDefaults.standard.set(tier.rawValue, forKey: planStorageKey)
+        if tier == .free {
+            selectedTier = .free
+            UserDefaults.standard.set(PremiumTier.free.rawValue, forKey: planStorageKey)
+            return
+        }
+
+        purchaseTier(tier)
     }
 
     func unlockVault() {
@@ -907,6 +1507,8 @@ private final class NativeVaultViewModel: ObservableObject {
             passwordHintInput = ""
             showMasterPassword = false
             refreshEntries()
+            startCloudSyncTimerIfNeeded()
+            triggerAutoSync(reason: "unlock")
         } catch {
             alertState = AlertState(message: (error as? LocalizedError)?.errorDescription ?? "Unable to unlock vault.")
         }
@@ -920,6 +1522,7 @@ private final class NativeVaultViewModel: ObservableObject {
         entries = []
         draft = .empty
         showEditorSheet = false
+        stopCloudSyncTimer()
         lastSuccessfulPassword = ""
     }
 
@@ -930,55 +1533,138 @@ private final class NativeVaultViewModel: ObservableObject {
         if enabled {
             if !lastSuccessfulPassword.isEmpty {
                 NativeKeychain.saveMasterPassword(lastSuccessfulPassword)
-                alertState = AlertState(message: "Passkey unlock enabled. You can unlock using Face ID / Passcode.")
+                alertState = AlertState(message: "Biometric unlock enabled. Face ID will be required.")
             } else {
-                alertState = AlertState(message: "Passkey unlock will activate after your next manual unlock.")
+                alertState = AlertState(message: "Biometric unlock will activate after your next manual unlock.")
             }
         } else {
             NativeKeychain.deleteMasterPassword()
-            alertState = AlertState(message: "Passkey unlock disabled.")
+            alertState = AlertState(message: "Biometric unlock disabled.")
         }
     }
 
     func unlockWithPasskey() {
         guard hasVault else {
-            alertState = AlertState(message: "Create your vault first, then enable passkey unlock.")
+            alertState = AlertState(message: "Create your vault first, then enable biometric unlock.")
             return
         }
 
         guard passkeyUnlockEnabled else {
-            alertState = AlertState(message: "Enable passkey unlock from Settings first.")
+            alertState = AlertState(message: "Enable biometric unlock from Settings first.")
             return
         }
 
-        guard let storedPassword = NativeKeychain.readMasterPassword(prompt: "Unlock PassGen Vault") else {
-            alertState = AlertState(message: "Passkey unlock is not ready. Unlock once with your master password.")
-            return
+        NativeKeychain.evaluateBiometricAndReadPassword(prompt: "Unlock PassGen Vault with Face ID") { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                switch result {
+                case .success(let storedPassword):
+                    self.masterPassword = storedPassword
+                    self.unlockVault()
+                case .failure(let error):
+                    self.alertState = AlertState(
+                        message: error.errorDescription ?? "Face ID unlock failed. Use your master password."
+                    )
+                }
+            }
         }
-
-        masterPassword = storedPassword
-        unlockVault()
     }
 
-    func connectAppleAccount(email: String?) {
-        authProviderLabel = "Apple"
-        authEmail = email ?? ""
-        UserDefaults.standard.set(authProviderLabel, forKey: authProviderStorageKey)
-        UserDefaults.standard.set(authEmail, forKey: authEmailStorageKey)
-        alertState = AlertState(message: "Signed in with Apple.")
+    func connectAppleAccount(credential: ASAuthorizationAppleIDCredential) {
+        guard let authClient = authClient else {
+            alertState = AlertState(message: runtimeConfigIssue ?? "Mobile runtime config is missing. Add Appflow Native Config values.")
+            return
+        }
+        guard let tokenData = credential.identityToken,
+              let identityToken = String(data: tokenData, encoding: .utf8),
+              !identityToken.isEmpty else {
+            alertState = AlertState(message: "Apple sign-in failed: missing identity token.")
+            return
+        }
+
+        Task {
+            await completeSupabaseSignIn(
+                authClient: authClient,
+                provider: .apple,
+                idToken: identityToken,
+                fallbackEmail: credential.email
+            )
+        }
     }
 
     func connectGoogleAccount() {
-        authProviderLabel = "Google"
-        UserDefaults.standard.set(authProviderLabel, forKey: authProviderStorageKey)
-        alertState = AlertState(message: "Google button is ready. Add client credentials in iOS config to complete live OAuth.")
+        guard let runtimeConfig, let authClient else {
+            alertState = AlertState(message: runtimeConfigIssue ?? "Mobile runtime config is missing. Add Appflow Native Config values.")
+            return
+        }
+
+#if canImport(GoogleSignIn)
+        guard let presenter = topMostViewController() else {
+            alertState = AlertState(message: "Unable to present Google login screen.")
+            return
+        }
+
+        authBusy = true
+        GIDSignIn.sharedInstance.configuration = GIDConfiguration(
+            clientID: runtimeConfig.googleIOSClientID,
+            serverClientID: runtimeConfig.googleServerClientID
+        )
+
+        GIDSignIn.sharedInstance.signIn(withPresenting: presenter) { [weak self] result, error in
+            guard let self = self else { return }
+            if let error {
+                DispatchQueue.main.async {
+                    self.authBusy = false
+                    self.alertState = AlertState(message: "Google sign-in failed: \(error.localizedDescription)")
+                }
+                return
+            }
+
+            guard let result,
+                  let idToken = result.user.idToken?.tokenString else {
+                DispatchQueue.main.async {
+                    self.authBusy = false
+                    self.alertState = AlertState(message: "Google sign-in failed: missing ID token.")
+                }
+                return
+            }
+
+            let email = result.user.profile?.email
+            Task { @MainActor in
+                await self.completeSupabaseSignIn(
+                    authClient: authClient,
+                    provider: .google,
+                    idToken: idToken,
+                    fallbackEmail: email
+                )
+            }
+        }
+#else
+        alertState = AlertState(message: "Google Sign-In SDK is not available in this build.")
+#endif
     }
 
     func disconnectAccount() {
         authProviderLabel = "Not Connected"
         authEmail = ""
+        session = nil
+        apiKeySummaries = []
+        developerAPIKey = ""
         UserDefaults.standard.removeObject(forKey: authProviderStorageKey)
         UserDefaults.standard.removeObject(forKey: authEmailStorageKey)
+        UserDefaults.standard.removeObject(forKey: developerAPIKeyStorageKey)
+        NativeSessionKeychain.delete()
+
+#if canImport(GoogleSignIn)
+        GIDSignIn.sharedInstance.signOut()
+#endif
+
+#if canImport(RevenueCat)
+        if Purchases.isConfigured {
+            Purchases.shared.logOut { _, _ in }
+        }
+#endif
+
         alertState = AlertState(message: "Account disconnected.")
     }
 
@@ -988,16 +1674,56 @@ private final class NativeVaultViewModel: ObservableObject {
             showPlanSheet = true
             return
         }
+        guard let authClient = authClient else {
+            alertState = AlertState(message: "Supabase mobile backend is not configured.")
+            return
+        }
+        guard let activeSession = session else {
+            alertState = AlertState(message: "Sign in first to generate API keys.")
+            return
+        }
 
-        developerAPIKey = makeRandomAPIKey()
-        UserDefaults.standard.set(developerAPIKey, forKey: developerAPIKeyStorageKey)
-        alertState = AlertState(message: "Developer API key generated.")
+        Task {
+            do {
+                let session = try await refreshedSessionIfNeeded(activeSession)
+                let created = try await authClient.createMobileAPIKey(
+                    accessToken: session.accessToken,
+                    label: selectedDeveloperTarget
+                )
+                let listed = try await authClient.listMobileAPIKeys(accessToken: session.accessToken)
+
+                developerAPIKey = created.key
+                apiKeySummaries = listed
+                UserDefaults.standard.set(developerAPIKey, forKey: developerAPIKeyStorageKey)
+                alertState = AlertState(message: "Developer API key generated from Supabase.")
+            } catch {
+                alertState = AlertState(message: "Unable to generate API key: \(error.localizedDescription)")
+            }
+        }
     }
 
     func revokeDeveloperAPIKey() {
-        developerAPIKey = ""
-        UserDefaults.standard.removeObject(forKey: developerAPIKeyStorageKey)
-        alertState = AlertState(message: "Developer API key revoked.")
+        guard let authClient, let activeSession = session else {
+            developerAPIKey = ""
+            UserDefaults.standard.removeObject(forKey: developerAPIKeyStorageKey)
+            alertState = AlertState(message: "Developer API key revoked locally.")
+            return
+        }
+
+        Task {
+            do {
+                let session = try await refreshedSessionIfNeeded(activeSession)
+                if let keyID = apiKeySummaries.first(where: { !$0.isRevoked })?.id {
+                    try await authClient.revokeMobileAPIKey(accessToken: session.accessToken, keyID: keyID)
+                }
+                apiKeySummaries = try await authClient.listMobileAPIKeys(accessToken: session.accessToken)
+                developerAPIKey = ""
+                UserDefaults.standard.removeObject(forKey: developerAPIKeyStorageKey)
+                alertState = AlertState(message: "Developer API key revoked.")
+            } catch {
+                alertState = AlertState(message: "Unable to revoke API key: \(error.localizedDescription)")
+            }
+        }
     }
 
     func makeBackupDocument() -> VaultBackupDocument? {
@@ -1012,14 +1738,20 @@ private final class NativeVaultViewModel: ObservableObject {
             return nil
         }
 
-        let payload = VaultBackupPayload(
-            version: 1,
-            exportedAt: Date(),
-            source: "PassGen iOS",
-            entries: entries
-        )
-
-        return VaultBackupDocument(payload: payload)
+        do {
+            let encryptedBlob = try store.exportEncryptedBlob()
+            let payload = VaultBackupPayload(
+                version: 2,
+                exportedAt: Date(),
+                source: "PassGen iOS",
+                encryptedBlobBase64: encryptedBlob.base64EncodedString(),
+                entries: nil
+            )
+            return VaultBackupDocument(payload: payload)
+        } catch {
+            alertState = AlertState(message: "Unable to prepare encrypted backup export.")
+            return nil
+        }
     }
 
     func importBackupDocument(_ document: VaultBackupDocument) {
@@ -1034,12 +1766,37 @@ private final class NativeVaultViewModel: ObservableObject {
             return
         }
 
+        if let blobBase64 = document.payload.encryptedBlobBase64,
+           let encryptedBlob = Data(base64Encoded: blobBase64),
+           !encryptedBlob.isEmpty {
+            do {
+                try createLocalRecoverySnapshot()
+                try store.importEncryptedBlob(encryptedBlob)
+                if !lastSuccessfulPassword.isEmpty {
+                    try store.unlock(password: lastSuccessfulPassword)
+                    refreshEntries()
+                    alertState = AlertState(message: "Imported encrypted backup successfully.")
+                    triggerAutoSync(reason: "import")
+                    return
+                }
+                alertState = AlertState(message: "Encrypted backup imported. Unlock with your master password.")
+            } catch {
+                alertState = AlertState(message: "Unable to import encrypted backup.")
+            }
+            return
+        }
+
+        guard let rawEntries = document.payload.entries else {
+            alertState = AlertState(message: "Backup file is missing supported payload data.")
+            return
+        }
+
         let now = Date()
         var existingIDs = Set(entries.map(\.id))
         var normalizedEntries: [VaultEntry] = []
-        normalizedEntries.reserveCapacity(document.payload.entries.count)
+        normalizedEntries.reserveCapacity(rawEntries.count)
 
-        for var imported in document.payload.entries {
+        for var imported in rawEntries {
             if imported.id.isEmpty || existingIDs.contains(imported.id) {
                 imported.id = UUID().uuidString
             }
@@ -1060,12 +1817,19 @@ private final class NativeVaultViewModel: ObservableObject {
             let importedCount = try store.importEntries(normalizedEntries)
             refreshEntries()
             alertState = AlertState(message: "Imported \(importedCount) passwords from backup.")
+            triggerAutoSync(reason: "import")
         } catch {
             alertState = AlertState(message: "Unable to import this backup file.")
         }
     }
 
     func importBackupData(_ data: Data) {
+        if let csv = String(data: data, encoding: .utf8),
+           looksLikeCSV(csv) {
+            importPasswordsCSV(csv)
+            return
+        }
+
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
@@ -1079,6 +1843,7 @@ private final class NativeVaultViewModel: ObservableObject {
                 version: 1,
                 exportedAt: Date(),
                 source: "legacy",
+                encryptedBlobBase64: nil,
                 entries: legacyEntries
             )
             importBackupDocument(VaultBackupDocument(payload: legacyPayload))
@@ -1088,19 +1853,663 @@ private final class NativeVaultViewModel: ObservableObject {
         alertState = AlertState(message: "Unsupported backup format.")
     }
 
-    private func makeRandomAPIKey() -> String {
-        var bytes = [UInt8](repeating: 0, count: 24)
-        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        guard status == errSecSuccess else {
-            return "pg_live_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+    func handleAppWillEnterForeground() {
+        refreshSupabaseSessionIfNeeded()
+        refreshTierFromRevenueCat()
+        if isUnlocked {
+            triggerAutoSync(reason: "foreground")
         }
-        let data = Data(bytes)
-        let token = data.base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
-        return "pg_live_\(token)"
     }
+
+    func setCloudProvider(_ provider: CloudSyncProvider) {
+        cloudSyncProvider = provider
+        UserDefaults.standard.set(provider.rawValue, forKey: cloudProviderStorageKey)
+        if provider == .none {
+            cloudSyncStatus = "Cloud sync disabled"
+            stopCloudSyncTimer()
+        } else if isUnlocked {
+            startCloudSyncTimerIfNeeded()
+            triggerAutoSync(reason: "provider-changed")
+        }
+    }
+
+    func syncCloudNow() {
+        triggerAutoSync(reason: "manual")
+    }
+
+    func restorePurchases() {
+#if canImport(RevenueCat)
+        guard runtimeConfig != nil else {
+            alertState = AlertState(message: "RevenueCat runtime config is missing.")
+            return
+        }
+        planBusy = true
+        Task {
+            defer { planBusy = false }
+            do {
+                try await configureRevenueCat()
+                let customerInfo = try await restoreRevenueCatPurchases()
+                applyTierFromCustomerInfo(customerInfo)
+                alertState = AlertState(message: "Purchases restored successfully.")
+            } catch {
+                alertState = AlertState(message: "Restore purchases failed: \(error.localizedDescription)")
+            }
+        }
+#else
+        alertState = AlertState(message: "Purchase restore is unavailable in this build.")
+#endif
+    }
+
+    private func purchaseTier(_ tier: PremiumTier) {
+#if canImport(RevenueCat)
+        guard runtimeConfig != nil else {
+            alertState = AlertState(message: "RevenueCat runtime config is missing.")
+            return
+        }
+        guard tier != .free else {
+            selectedTier = .free
+            UserDefaults.standard.set(PremiumTier.free.rawValue, forKey: planStorageKey)
+            return
+        }
+        planBusy = true
+        Task {
+            defer { planBusy = false }
+            do {
+                try await configureRevenueCat()
+                let offerings = try await fetchRevenueCatOfferings()
+                guard let package = packageForTier(tier, from: offerings) else {
+                    throw SupabaseAuthError.requestFailed("No \(tier.title) package found in RevenueCat offerings.")
+                }
+                let customerInfo = try await purchaseRevenueCatPackage(package)
+                applyTierFromCustomerInfo(customerInfo)
+                alertState = AlertState(message: "\(tier.title) plan activated.")
+            } catch {
+                alertState = AlertState(message: "Purchase failed: \(error.localizedDescription)")
+            }
+        }
+#else
+        alertState = AlertState(message: "In-app purchases are unavailable in this build.")
+#endif
+    }
+
+    private func refreshTierFromRevenueCat() {
+#if canImport(RevenueCat)
+        guard runtimeConfig != nil else { return }
+        Task {
+            do {
+                try await configureRevenueCat()
+                let customerInfo = try await fetchRevenueCatCustomerInfo()
+                applyTierFromCustomerInfo(customerInfo)
+            } catch {
+                // Keep cached tier if RC call fails.
+            }
+        }
+#endif
+    }
+
+    private func applySession(_ nextSession: SupabaseSession, providerLabel: String, fallbackEmail: String?) {
+        session = nextSession
+        NativeSessionKeychain.save(nextSession)
+        authProviderLabel = providerLabel
+        authEmail = nextSession.email ?? fallbackEmail ?? authEmail
+        UserDefaults.standard.set(authProviderLabel, forKey: authProviderStorageKey)
+        UserDefaults.standard.set(authEmail, forKey: authEmailStorageKey)
+    }
+
+    private func completeSupabaseSignIn(
+        authClient: SupabaseAuthClient,
+        provider: NativeAuthProvider,
+        idToken: String,
+        fallbackEmail: String?
+    ) async {
+        authBusy = true
+        defer { authBusy = false }
+
+        do {
+            let signedInSession = try await authClient.signInWithIDToken(provider: provider, idToken: idToken, nonce: nil)
+            let providerLabel = provider == .apple ? "Apple" : "Google"
+            applySession(signedInSession, providerLabel: providerLabel, fallbackEmail: fallbackEmail)
+            alertState = AlertState(message: "Signed in with \(providerLabel).")
+
+            if isPaidTier {
+                if let listed = try? await authClient.listMobileAPIKeys(accessToken: signedInSession.accessToken) {
+                    apiKeySummaries = listed
+                }
+            }
+
+#if canImport(RevenueCat)
+            do {
+                try await configureRevenueCat()
+                let info = try await fetchRevenueCatCustomerInfo()
+                applyTierFromCustomerInfo(info)
+            } catch {
+                // ignore RC sync failures during login
+            }
+#endif
+        } catch {
+            alertState = AlertState(message: "Sign-in failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func refreshSupabaseSessionIfNeeded() {
+        guard let authClient, let activeSession = session else { return }
+        Task {
+            do {
+                _ = try await refreshedSessionIfNeeded(activeSession, authClient: authClient)
+            } catch {
+                // Session refresh failure should not lock local vault, keep account label but warn user.
+                alertState = AlertState(message: "Session refresh failed. Please sign in again if cloud features stop working.")
+            }
+        }
+    }
+
+    private func refreshedSessionIfNeeded(_ activeSession: SupabaseSession, authClient: SupabaseAuthClient? = nil) async throws -> SupabaseSession {
+        guard activeSession.isStale else {
+            return activeSession
+        }
+        guard let authClient = authClient ?? self.authClient else {
+            return activeSession
+        }
+
+        let refreshed = try await authClient.refreshSession(activeSession)
+        applySession(refreshed, providerLabel: authProviderLabel, fallbackEmail: refreshed.email)
+        return refreshed
+    }
+
+    private func triggerAutoSync(reason: String) {
+        guard hasCloudTools else { return }
+        guard cloudSyncProvider != .none else { return }
+        guard hasVault else { return }
+        guard !cloudSyncInFlight else { return }
+        cloudSyncInFlight = true
+
+        Task {
+            defer { cloudSyncInFlight = false }
+            do {
+                switch cloudSyncProvider {
+                case .icloud:
+                    try syncWithICloud()
+                case .googleDrive:
+                    try await syncWithGoogleDrive()
+                case .none:
+                    break
+                }
+                lastCloudSyncAt = Date()
+                UserDefaults.standard.set(lastCloudSyncAt, forKey: cloudSyncAtStorageKey)
+                cloudSyncStatus = "Synced (\(reason))"
+            } catch {
+                cloudSyncStatus = "Sync failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func startCloudSyncTimerIfNeeded() {
+        guard cloudSyncProvider != .none, hasCloudTools, isUnlocked else { return }
+        if cloudSyncTimer != nil { return }
+        cloudSyncTimer = Timer.scheduledTimer(withTimeInterval: 45, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.triggerAutoSync(reason: "timer")
+            }
+        }
+    }
+
+    private func stopCloudSyncTimer() {
+        cloudSyncTimer?.invalidate()
+        cloudSyncTimer = nil
+    }
+
+    private func syncWithICloud() throws {
+        let localURL = store.encryptedVaultFileURL
+        guard FileManager.default.fileExists(atPath: localURL.path) else { return }
+
+        guard let containerURL = FileManager.default.url(forUbiquityContainerIdentifier: nil) else {
+            throw SupabaseAuthError.requestFailed("iCloud Drive is unavailable. Enable iCloud Documents capability.")
+        }
+
+        let folderURL = containerURL
+            .appendingPathComponent("Documents", isDirectory: true)
+            .appendingPathComponent(runtimeConfig?.driveAppFolder ?? "PassGenVault", isDirectory: true)
+        try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
+        let remoteURL = folderURL.appendingPathComponent("passgen-vault-encrypted.pgvault")
+
+        let localModified = store.vaultModifiedAt() ?? .distantPast
+        let remoteModified = ((try? FileManager.default.attributesOfItem(atPath: remoteURL.path)[.modificationDate]) as? Date) ?? .distantPast
+
+        if remoteModified > localModified {
+            try createLocalRecoverySnapshot()
+            let remoteData = try Data(contentsOf: remoteURL)
+            try store.importEncryptedBlob(remoteData)
+            if !lastSuccessfulPassword.isEmpty {
+                try store.unlock(password: lastSuccessfulPassword)
+                refreshEntries()
+            } else {
+                lockVault()
+            }
+        } else {
+            let payload = try store.exportEncryptedBlob()
+            try payload.write(to: remoteURL, options: .atomic)
+        }
+    }
+
+    private func syncWithGoogleDrive() async throws {
+#if canImport(GoogleSignIn)
+        guard let currentUser = GIDSignIn.sharedInstance.currentUser else {
+            throw SupabaseAuthError.requestFailed("Google Drive sync requires Google login.")
+        }
+
+        let token = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+            currentUser.refreshTokensIfNeeded { user, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let accessToken = user?.accessToken.tokenString else {
+                    continuation.resume(throwing: SupabaseAuthError.requestFailed("Google access token is unavailable."))
+                    return
+                }
+                continuation.resume(returning: accessToken)
+            }
+        }
+
+        let fileName = "\(runtimeConfig?.driveAppFolder ?? "PassGenVault")-vault.pgvault"
+        let localData = try store.exportEncryptedBlob()
+        let localModified = store.vaultModifiedAt() ?? .distantPast
+
+        let metadata = try await fetchGoogleDriveMetadata(fileName: fileName, accessToken: token)
+        if let metadata,
+           let remoteModified = metadata.modifiedTime,
+           remoteModified > localModified {
+            try createLocalRecoverySnapshot()
+            let remoteData = try await downloadGoogleDriveFile(fileID: metadata.id, accessToken: token)
+            try store.importEncryptedBlob(remoteData)
+            if !lastSuccessfulPassword.isEmpty {
+                try store.unlock(password: lastSuccessfulPassword)
+                refreshEntries()
+            } else {
+                lockVault()
+            }
+        } else if let metadata {
+            try await updateGoogleDriveFile(fileID: metadata.id, payload: localData, accessToken: token)
+        } else {
+            try await createGoogleDriveFile(fileName: fileName, payload: localData, accessToken: token)
+        }
+#else
+        throw SupabaseAuthError.requestFailed("Google Drive sync is unavailable in this build.")
+#endif
+    }
+
+    private func createLocalRecoverySnapshot() throws {
+        let recoveryFolder = store.encryptedVaultFileURL.deletingLastPathComponent().appendingPathComponent("Recovery", isDirectory: true)
+        try FileManager.default.createDirectory(at: recoveryFolder, withIntermediateDirectories: true)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let snapshotURL = recoveryFolder.appendingPathComponent("vault-recovery-\(formatter.string(from: Date())).pgvault")
+        let blob = try store.exportEncryptedBlob()
+        try blob.write(to: snapshotURL, options: .atomic)
+    }
+
+    private func looksLikeCSV(_ text: String) -> Bool {
+        let firstLine = text.split(whereSeparator: \.isNewline).first?.lowercased() ?? ""
+        return firstLine.contains("username") && firstLine.contains("password") && firstLine.contains(",")
+    }
+
+    private func importPasswordsCSV(_ csv: String) {
+        guard isUnlocked else {
+            alertState = AlertState(message: "Unlock your vault before importing CSV.")
+            return
+        }
+
+        let rows = parseCSVRows(csv)
+        guard let header = rows.first, rows.count > 1 else {
+            alertState = AlertState(message: "CSV import failed: file appears empty.")
+            return
+        }
+
+        let headerIndex = Dictionary(uniqueKeysWithValues: header.enumerated().map { ($0.element.lowercased(), $0.offset) })
+
+        func field(_ row: [String], _ key: String) -> String {
+            guard let index = headerIndex[key], index < row.count else { return "" }
+            return row[index].trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        var imported: [VaultEntry] = []
+        for row in rows.dropFirst() {
+            let title = field(row, "title")
+            let url = field(row, "url")
+            let username = field(row, "username")
+            let password = field(row, "password")
+            let notes = field(row, "notes")
+            let otpauth = field(row, "otpauth")
+
+            guard !password.isEmpty else { continue }
+            let name = title.isEmpty ? (normalizedDomain(from: url) ?? "Imported Account") : title
+
+            var entry = VaultEntry(
+                id: UUID().uuidString,
+                name: name,
+                username: username,
+                password: password,
+                url: url,
+                notes: notes,
+                websitePresetId: nil,
+                websiteDomain: normalizedDomain(from: url),
+                websiteDescription: nil,
+                totpSecret: nil,
+                totpIssuer: nil,
+                totpAccountName: nil,
+                totpDigits: 6,
+                totpPeriod: 30,
+                totpAlgorithm: "SHA1",
+                createdAt: Date(),
+                updatedAt: Date()
+            )
+
+            if !otpauth.isEmpty, let parsed = TOTPGenerator.parseOtpauthURL(otpauth) {
+                entry.totpSecret = parsed.secret
+                entry.totpIssuer = parsed.issuer
+                entry.totpAccountName = parsed.account
+                entry.totpDigits = parsed.digits
+                entry.totpPeriod = parsed.period
+                entry.totpAlgorithm = parsed.algorithm
+            }
+            imported.append(entry)
+        }
+
+        if imported.isEmpty {
+            alertState = AlertState(message: "No valid rows found in CSV.")
+            return
+        }
+
+        if selectedTier == .free {
+            let allowed = max(0, freePlanLimit - entries.count)
+            if allowed <= 0 {
+                alertState = AlertState(message: "Free plan is full. Upgrade to import CSV data.")
+                showPlanSheet = true
+                return
+            }
+            imported = Array(imported.prefix(allowed))
+        }
+
+        do {
+            _ = try store.importEntries(imported)
+            refreshEntries()
+            alertState = AlertState(message: "Imported \(imported.count) passwords from CSV.")
+            triggerAutoSync(reason: "csv-import")
+        } catch {
+            alertState = AlertState(message: "CSV import failed.")
+        }
+    }
+
+    private func parseCSVRows(_ text: String) -> [[String]] {
+        var rows: [[String]] = []
+        var row: [String] = []
+        var cell = ""
+        var inQuotes = false
+        let chars = Array(text)
+        var index = 0
+
+        while index < chars.count {
+            let char = chars[index]
+            if char == "\"" {
+                if inQuotes, index + 1 < chars.count, chars[index + 1] == "\"" {
+                    cell.append("\"")
+                    index += 1
+                } else {
+                    inQuotes.toggle()
+                }
+            } else if char == "," && !inQuotes {
+                row.append(cell)
+                cell = ""
+            } else if (char == "\n" || char == "\r") && !inQuotes {
+                if char == "\r", index + 1 < chars.count, chars[index + 1] == "\n" {
+                    index += 1
+                }
+                row.append(cell)
+                rows.append(row)
+                row = []
+                cell = ""
+            } else {
+                cell.append(char)
+            }
+            index += 1
+        }
+
+        if !cell.isEmpty || !row.isEmpty {
+            row.append(cell)
+            rows.append(row)
+        }
+        return rows
+    }
+
+    private struct GoogleDriveMetadata: Decodable {
+        let id: String
+        let name: String
+        let modifiedTimeRaw: String?
+
+        enum CodingKeys: String, CodingKey {
+            case id
+            case name
+            case modifiedTimeRaw = "modifiedTime"
+        }
+
+        var modifiedTime: Date? {
+            guard let modifiedTimeRaw else { return nil }
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let value = formatter.date(from: modifiedTimeRaw) {
+                return value
+            }
+            formatter.formatOptions = [.withInternetDateTime]
+            return formatter.date(from: modifiedTimeRaw)
+        }
+    }
+
+    private struct GoogleDriveListResponse: Decodable {
+        let files: [GoogleDriveMetadata]
+    }
+
+    private func fetchGoogleDriveMetadata(fileName: String, accessToken: String) async throws -> GoogleDriveMetadata? {
+        var components = URLComponents(string: "https://www.googleapis.com/drive/v3/files")!
+        components.queryItems = [
+            URLQueryItem(name: "spaces", value: "appDataFolder"),
+            URLQueryItem(name: "q", value: "name='\(fileName)' and 'appDataFolder' in parents and trashed=false"),
+            URLQueryItem(name: "fields", value: "files(id,name,modifiedTime)")
+        ]
+
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw SupabaseAuthError.requestFailed("Google Drive metadata request failed.")
+        }
+
+        let decoded = try JSONDecoder().decode(GoogleDriveListResponse.self, from: data)
+        return decoded.files.first
+    }
+
+    private func downloadGoogleDriveFile(fileID: String, accessToken: String) async throws -> Data {
+        guard let url = URL(string: "https://www.googleapis.com/drive/v3/files/\(fileID)?alt=media") else {
+            throw SupabaseAuthError.requestFailed("Invalid Google Drive download URL.")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw SupabaseAuthError.requestFailed("Google Drive file download failed.")
+        }
+        return data
+    }
+
+    private func updateGoogleDriveFile(fileID: String, payload: Data, accessToken: String) async throws {
+        guard let url = URL(string: "https://www.googleapis.com/upload/drive/v3/files/\(fileID)?uploadType=media") else {
+            throw SupabaseAuthError.requestFailed("Invalid Google Drive upload URL.")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        request.httpBody = payload
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw SupabaseAuthError.requestFailed("Google Drive update failed.")
+        }
+    }
+
+    private func createGoogleDriveFile(fileName: String, payload: Data, accessToken: String) async throws {
+        guard let url = URL(string: "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart") else {
+            throw SupabaseAuthError.requestFailed("Invalid Google Drive create URL.")
+        }
+
+        let boundary = "PassGenBoundary-\(UUID().uuidString)"
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/related; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        let metadata = ["name": fileName, "parents": ["appDataFolder"]] as [String : Any]
+        let metadataData = try JSONSerialization.data(withJSONObject: metadata, options: [])
+
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Type: application/json; charset=UTF-8\r\n\r\n".data(using: .utf8)!)
+        body.append(metadataData)
+        body.append("\r\n--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
+        body.append(payload)
+        body.append("\r\n--\(boundary)--".data(using: .utf8)!)
+
+        request.httpBody = body
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw SupabaseAuthError.requestFailed("Google Drive create file failed.")
+        }
+    }
+
+#if canImport(RevenueCat)
+    private func configureRevenueCat() async throws {
+        guard let runtimeConfig = runtimeConfig else {
+            throw SupabaseAuthError.requestFailed("RevenueCat runtime config is missing.")
+        }
+
+        Purchases.logLevel = .debug
+
+        if !Purchases.isConfigured {
+            Purchases.configure(withAPIKey: runtimeConfig.revenueCatAPIKey, appUserID: session?.userId)
+        } else if let userID = session?.userId {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                Purchases.shared.logIn(userID) { _, _, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume(returning: ())
+                    }
+                }
+            }
+        }
+    }
+
+    private func fetchRevenueCatOfferings() async throws -> Offerings {
+        try await withCheckedThrowingContinuation { continuation in
+            Purchases.shared.getOfferings { offerings, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let offerings else {
+                    continuation.resume(throwing: SupabaseAuthError.requestFailed("RevenueCat offerings are unavailable."))
+                    return
+                }
+                continuation.resume(returning: offerings)
+            }
+        }
+    }
+
+    private func fetchRevenueCatCustomerInfo() async throws -> CustomerInfo {
+        try await withCheckedThrowingContinuation { continuation in
+            Purchases.shared.getCustomerInfo { info, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let info else {
+                    continuation.resume(throwing: SupabaseAuthError.requestFailed("Customer info is unavailable."))
+                    return
+                }
+                continuation.resume(returning: info)
+            }
+        }
+    }
+
+    private func purchaseRevenueCatPackage(_ package: Package) async throws -> CustomerInfo {
+        try await withCheckedThrowingContinuation { continuation in
+            Purchases.shared.purchase(package: package) { _, customerInfo, error, userCancelled in
+                if userCancelled {
+                    continuation.resume(throwing: SupabaseAuthError.requestFailed("Purchase was cancelled."))
+                    return
+                }
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let customerInfo else {
+                    continuation.resume(throwing: SupabaseAuthError.requestFailed("Purchase did not return customer info."))
+                    return
+                }
+                continuation.resume(returning: customerInfo)
+            }
+        }
+    }
+
+    private func restoreRevenueCatPurchases() async throws -> CustomerInfo {
+        try await withCheckedThrowingContinuation { continuation in
+            Purchases.shared.restorePurchases { customerInfo, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let customerInfo else {
+                    continuation.resume(throwing: SupabaseAuthError.requestFailed("Restore purchases failed."))
+                    return
+                }
+                continuation.resume(returning: customerInfo)
+            }
+        }
+    }
+
+    private func packageForTier(_ tier: PremiumTier, from offerings: Offerings) -> Package? {
+        guard let current = offerings.current else { return nil }
+
+        let candidates = current.availablePackages
+        if tier == .cloud {
+            return candidates.first(where: { $0.storeProduct.productIdentifier.lowercased().contains("cloud") || $0.identifier.lowercased().contains("cloud") })
+        }
+
+        if tier == .pro {
+            return candidates.first(where: { $0.storeProduct.productIdentifier.lowercased().contains("pro") || $0.identifier.lowercased().contains("pro") })
+        }
+
+        return nil
+    }
+
+    private func applyTierFromCustomerInfo(_ customerInfo: CustomerInfo) {
+        if customerInfo.entitlements.active["cloud"] != nil {
+            selectedTier = .cloud
+        } else if customerInfo.entitlements.active["pro"] != nil {
+            selectedTier = .pro
+        } else {
+            selectedTier = .free
+        }
+        UserDefaults.standard.set(selectedTier.rawValue, forKey: planStorageKey)
+    }
+#endif
 
     func refreshEntries() {
         do {
@@ -1127,6 +2536,19 @@ private final class NativeVaultViewModel: ObservableObject {
         }
 
         showWebsitePicker = false
+    }
+
+    func applyTOTPFromURI(_ uri: String) {
+        guard let parsed = TOTPGenerator.parseOtpauthURL(uri) else {
+            alertState = AlertState(message: "Invalid 2FA QR format.")
+            return
+        }
+        draft.totpSecret = parsed.secret
+        draft.totpIssuer = parsed.issuer
+        draft.totpAccountName = parsed.account
+        draft.totpDigits = parsed.digits
+        draft.totpPeriod = parsed.period
+        draft.totpAlgorithm = parsed.algorithm
     }
 
     func startCreateEntry(seedPassword: String? = nil) {
@@ -1180,6 +2602,7 @@ private final class NativeVaultViewModel: ObservableObject {
             let entry = draft.toEntry(now: Date())
             try store.upsert(entry: entry)
             refreshEntries()
+            triggerAutoSync(reason: "vault-update")
             showEditorSheet = false
             draft = .empty
             return true
@@ -1193,6 +2616,7 @@ private final class NativeVaultViewModel: ObservableObject {
         do {
             try store.delete(entryID: entry.id)
             refreshEntries()
+            triggerAutoSync(reason: "vault-delete")
         } catch {
             alertState = AlertState(message: "Unable to delete entry.")
         }
@@ -1256,7 +2680,11 @@ private final class NativeVaultViewModel: ObservableObject {
             UserDefaults.standard.removeObject(forKey: authProviderStorageKey)
             UserDefaults.standard.removeObject(forKey: authEmailStorageKey)
             UserDefaults.standard.removeObject(forKey: developerAPIKeyStorageKey)
+            UserDefaults.standard.removeObject(forKey: cloudProviderStorageKey)
+            UserDefaults.standard.removeObject(forKey: cloudSyncAtStorageKey)
             NativeKeychain.deleteMasterPassword()
+            NativeSessionKeychain.delete()
+            stopCloudSyncTimer()
 
             hasVault = false
             isUnlocked = false
@@ -1277,9 +2705,15 @@ private final class NativeVaultViewModel: ObservableObject {
             passkeyUnlockEnabled = false
             authProviderLabel = "Not Connected"
             authEmail = ""
+            authBusy = false
             developerAPIKey = ""
+            apiKeySummaries = []
+            cloudSyncProvider = .none
+            cloudSyncStatus = "Cloud sync disabled"
+            lastCloudSyncAt = nil
             generatedPassword = generatePassword()
             lastSuccessfulPassword = ""
+            session = nil
         } catch {
             alertState = AlertState(message: "Unable to reset app data.")
         }
@@ -1453,15 +2887,31 @@ private struct NativePlansView: View {
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(.secondary)
 
-                        Button(viewModel.selectedTier == tier ? "Current Plan" : "Select Plan") {
+                        Button(viewModel.selectedTier == tier ? "Current Plan" : (tier == .free ? "Use Free Plan" : "Upgrade with App Store")) {
                             viewModel.setTier(tier)
-                            dismiss()
+                            if tier == .free {
+                                dismiss()
+                            }
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(viewModel.selectedTier == tier)
+                        .disabled(viewModel.selectedTier == tier || viewModel.planBusy)
                     }
                     .padding(.vertical, 6)
                 }
+
+                if viewModel.planBusy {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Contacting App Store...")
+                            .font(.system(size: 14, weight: .medium))
+                    }
+                    .padding(.vertical, 8)
+                }
+
+                Button("Restore Purchases") {
+                    viewModel.restorePurchases()
+                }
+                .disabled(viewModel.planBusy)
             }
             .navigationTitle("Plans")
             .toolbar {
@@ -1535,7 +2985,7 @@ private struct NativeUnlockView: View {
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "faceid")
-                            Text("Unlock with Face ID / Passcode")
+                            Text("Unlock with Face ID")
                         }
                         .font(.system(size: 16, weight: .semibold))
                         .frame(maxWidth: .infinity)
@@ -1796,6 +3246,12 @@ private struct NativeSettingsTabView: View {
                 }
 
                 Section("Authentication") {
+                    if let runtimeConfigIssue = viewModel.runtimeConfigIssue, !runtimeConfigIssue.isEmpty {
+                        Text(runtimeConfigIssue)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.red)
+                    }
+
                     HStack {
                         Text("Connected Account")
                         Spacer()
@@ -1816,9 +3272,9 @@ private struct NativeSettingsTabView: View {
                         switch result {
                         case .success(let authorization):
                             if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
-                                viewModel.connectAppleAccount(email: credential.email)
+                                viewModel.connectAppleAccount(credential: credential)
                             } else {
-                                viewModel.connectAppleAccount(email: nil)
+                                viewModel.alertState = AlertState(message: "Apple sign-in failed: missing Apple ID credential.")
                             }
                         case .failure(let error):
                             viewModel.alertState = AlertState(message: "Apple sign-in failed: \(error.localizedDescription)")
@@ -1831,13 +3287,22 @@ private struct NativeSettingsTabView: View {
                         viewModel.connectGoogleAccount()
                     } label: {
                         HStack(spacing: 10) {
-                            WebsiteBrandIconView(domain: "google.com", title: "Google", size: 20)
+                            GoogleSignInLogoView(size: 20)
                             Text("Continue with Google")
                             Spacer()
                             if viewModel.authProviderLabel == "Google" {
                                 Image(systemName: "checkmark.circle.fill")
                                     .foregroundColor(Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
                             }
+                        }
+                    }
+                    .disabled(viewModel.authBusy)
+
+                    if viewModel.authBusy {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Signing in...")
+                                .font(.system(size: 13, weight: .medium))
                         }
                     }
 
@@ -1877,6 +3342,19 @@ private struct NativeSettingsTabView: View {
                                 viewModel.revokeDeveloperAPIKey()
                             }
                         }
+
+                        if !viewModel.apiKeySummaries.isEmpty {
+                            ForEach(viewModel.apiKeySummaries) { key in
+                                HStack {
+                                    Text(key.keyPrefix)
+                                        .font(.system(.footnote, design: .monospaced))
+                                    Spacer()
+                                    Text(key.isRevoked ? "Revoked" : "Active")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundColor(key.isRevoked ? .red : .green)
+                                }
+                            }
+                        }
                     } else {
                         Text("Developer API key generation is available on PRO and CLOUD monthly plans.")
                             .font(.system(size: 13, weight: .medium))
@@ -1892,6 +3370,30 @@ private struct NativeSettingsTabView: View {
                     Text("CLOUD plan supports backup import from iCloud Drive / Google Drive and backup export through Files.")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.secondary)
+
+                    Picker("Provider", selection: Binding(
+                        get: { viewModel.cloudSyncProvider },
+                        set: { viewModel.setCloudProvider($0) }
+                    )) {
+                        ForEach(CloudSyncProvider.allCases, id: \.self) { provider in
+                            Text(provider.title).tag(provider)
+                        }
+                    }
+                    .disabled(!viewModel.hasCloudTools)
+
+                    if let lastSync = viewModel.lastCloudSyncAt {
+                        Text("Last sync: \(lastSync.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
+                    Text(viewModel.cloudSyncStatus)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
+
+                    Button("Sync Now") {
+                        viewModel.syncCloudNow()
+                    }
+                    .disabled(!viewModel.hasCloudTools || viewModel.cloudSyncProvider == .none)
 
                     Button("Export Passwords Backup") {
                         if let document = viewModel.makeBackupDocument() {
@@ -1919,11 +3421,11 @@ private struct NativeSettingsTabView: View {
                 }
 
                 Section("Security") {
-                    Toggle("Enable Passkey Unlock (Face ID / Passcode)", isOn: passkeyBinding)
+                    Toggle("Enable Biometric Unlock (Face ID)", isOn: passkeyBinding)
                         .disabled(!viewModel.hasVault)
 
                     if !viewModel.hasVault {
-                        Text("Create your vault first to enable passkey unlock.")
+                        Text("Create your vault first to enable biometric unlock.")
                             .font(.system(size: 12, weight: .regular))
                             .foregroundColor(.secondary)
                     }
@@ -1940,7 +3442,7 @@ private struct NativeSettingsTabView: View {
             .navigationTitle("Settings")
             .fileImporter(
                 isPresented: $showImportPicker,
-                allowedContentTypes: [.passgenBackup, .json]
+                allowedContentTypes: [.passgenBackup, .json, .commaSeparatedText, .plainText]
             ) { result in
                 switch result {
                 case .success(let url):
@@ -1983,6 +3485,10 @@ private struct NativeEntryEditorView: View {
     @ObservedObject var viewModel: NativeVaultViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var showPassword = false
+    @State private var showQRCodeScanner = false
+    @State private var now = Date()
+
+    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private var entryTitle: String {
         viewModel.draft.id == nil ? "Add Website" : "Edit Website"
@@ -2087,6 +3593,77 @@ private struct NativeEntryEditorView: View {
                     }
                 }
 
+                Section("2FA Authenticator") {
+                    if let secret = viewModel.draft.totpSecret?.trimmingCharacters(in: .whitespacesAndNewlines),
+                       !secret.isEmpty {
+                        let digits = max(6, min(8, viewModel.draft.totpDigits))
+                        let period = max(15, min(60, viewModel.draft.totpPeriod))
+                        let algorithm = viewModel.draft.totpAlgorithm.isEmpty ? "SHA1" : viewModel.draft.totpAlgorithm
+                        let currentCode = TOTPGenerator.currentCode(
+                            secret: secret,
+                            digits: digits,
+                            period: period,
+                            algorithm: algorithm,
+                            date: now
+                        )
+                        let remaining = TOTPGenerator.remainingSeconds(period: period, date: now)
+
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Current Code")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(.secondary)
+                                Text(currentCode ?? "------")
+                                    .font(.system(size: 22, weight: .semibold, design: .monospaced))
+                            }
+                            Spacer()
+                            Text("\(remaining)s")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(.secondary)
+                        }
+
+                        Button("Copy 2FA Code") {
+                            if let code = currentCode {
+                                viewModel.copyToClipboard(code, label: "2FA code")
+                            } else {
+                                viewModel.alertState = AlertState(message: "Unable to generate 2FA code.")
+                            }
+                        }
+                    }
+
+                    Button("Scan 2FA QR Code") {
+                        showQRCodeScanner = true
+                    }
+
+                    TextField("2FA Secret", text: Binding(
+                        get: { viewModel.draft.totpSecret ?? "" },
+                        set: { value in
+                            viewModel.draft.totpSecret = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                        }
+                    ))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+
+                    TextField("Issuer", text: Binding(
+                        get: { viewModel.draft.totpIssuer ?? "" },
+                        set: { viewModel.draft.totpIssuer = $0 }
+                    ))
+
+                    TextField("Account", text: Binding(
+                        get: { viewModel.draft.totpAccountName ?? "" },
+                        set: { viewModel.draft.totpAccountName = $0 }
+                    ))
+
+                    Stepper("Digits: \(viewModel.draft.totpDigits)", value: $viewModel.draft.totpDigits, in: 6 ... 8)
+                    Stepper("Period: \(viewModel.draft.totpPeriod)s", value: $viewModel.draft.totpPeriod, in: 15 ... 60, step: 5)
+
+                    Picker("Algorithm", selection: $viewModel.draft.totpAlgorithm) {
+                        Text("SHA1").tag("SHA1")
+                        Text("SHA256").tag("SHA256")
+                        Text("SHA512").tag("SHA512")
+                    }
+                }
+
                 Section("Website URL") {
                     TextField("URL", text: $viewModel.draft.url)
                         .keyboardType(.URL)
@@ -2120,6 +3697,17 @@ private struct NativeEntryEditorView: View {
         .navigationViewStyle(.stack)
         .sheet(isPresented: $viewModel.showWebsitePicker) {
             NativeWebsitePickerView(viewModel: viewModel)
+        }
+        .sheet(isPresented: $showQRCodeScanner) {
+            NativeQRCodeScannerView(onScanned: { scanned in
+                showQRCodeScanner = false
+                viewModel.applyTOTPFromURI(scanned)
+            }, onCancel: {
+                showQRCodeScanner = false
+            }
+        }
+        .onReceive(timer) { value in
+            now = value
         }
     }
 }
@@ -2206,6 +3794,288 @@ private struct NativeWebsitePickerView: View {
                 searchFocused = true
             }
         }
+    }
+}
+
+private struct GoogleSignInLogoView: View {
+    let size: CGFloat
+
+    var body: some View {
+        Group {
+            if let url = URL(string: "https://www.gstatic.com/images/branding/product/1x/googleg_standard_color_18dp.png") {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFit()
+                    default:
+                        Text("G")
+                            .font(.system(size: size * 0.82, weight: .bold))
+                            .foregroundColor(Color(red: 66 / 255, green: 133 / 255, blue: 244 / 255))
+                    }
+                }
+            } else {
+                Text("G")
+                    .font(.system(size: size * 0.82, weight: .bold))
+                    .foregroundColor(Color(red: 66 / 255, green: 133 / 255, blue: 244 / 255))
+            }
+        }
+        .frame(width: size, height: size)
+        .background(Circle().fill(Color.white))
+    }
+}
+
+private enum TOTPGenerator {
+    struct ParsedTOTPURI {
+        let secret: String
+        let issuer: String?
+        let account: String?
+        let digits: Int
+        let period: Int
+        let algorithm: String
+    }
+
+    static func parseOtpauthURL(_ rawValue: String) -> ParsedTOTPURI? {
+        guard let components = URLComponents(string: rawValue),
+              components.scheme?.lowercased() == "otpauth",
+              components.host?.lowercased() == "totp" else {
+            return nil
+        }
+
+        let labelRaw = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let decodedLabel = labelRaw.removingPercentEncoding ?? labelRaw
+        let labelParts = decodedLabel.split(separator: ":", maxSplits: 1).map(String.init)
+
+        var issuer: String? = nil
+        var account: String? = nil
+        if labelParts.count == 2 {
+            issuer = labelParts[0]
+            account = labelParts[1]
+        } else if labelParts.count == 1 {
+            account = labelParts[0]
+        }
+
+        let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name.lowercased(), $0.value ?? "") })
+        guard let secret = query["secret"]?.trimmingCharacters(in: .whitespacesAndNewlines), !secret.isEmpty else {
+            return nil
+        }
+
+        let queryIssuer = query["issuer"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let queryIssuer, !queryIssuer.isEmpty {
+            issuer = queryIssuer
+        }
+
+        let digits = Int(query["digits"] ?? "") ?? 6
+        let period = Int(query["period"] ?? "") ?? 30
+        let algorithm = (query["algorithm"] ?? "SHA1").uppercased()
+
+        return ParsedTOTPURI(
+            secret: secret,
+            issuer: issuer,
+            account: account,
+            digits: max(6, min(8, digits)),
+            period: max(15, min(60, period)),
+            algorithm: ["SHA1", "SHA256", "SHA512"].contains(algorithm) ? algorithm : "SHA1"
+        )
+    }
+
+    static func currentCode(secret: String, digits: Int, period: Int, algorithm: String, date: Date) -> String? {
+        guard let key = decodeBase32(secret) else { return nil }
+
+        let counter = UInt64(floor(date.timeIntervalSince1970 / Double(max(1, period))))
+        var movingFactor = counter.bigEndian
+        let message = Data(bytes: &movingFactor, count: MemoryLayout<UInt64>.size)
+
+        let digestInfo: (algorithm: CCHmacAlgorithm, length: Int)
+        switch algorithm.uppercased() {
+        case "SHA256":
+            digestInfo = (CCHmacAlgorithm(kCCHmacAlgSHA256), Int(CC_SHA256_DIGEST_LENGTH))
+        case "SHA512":
+            digestInfo = (CCHmacAlgorithm(kCCHmacAlgSHA512), Int(CC_SHA512_DIGEST_LENGTH))
+        default:
+            digestInfo = (CCHmacAlgorithm(kCCHmacAlgSHA1), Int(CC_SHA1_DIGEST_LENGTH))
+        }
+
+        var digest = [UInt8](repeating: 0, count: digestInfo.length)
+        key.withUnsafeBytes { keyPointer in
+            message.withUnsafeBytes { messagePointer in
+                CCHmac(
+                    digestInfo.algorithm,
+                    keyPointer.baseAddress,
+                    key.count,
+                    messagePointer.baseAddress,
+                    message.count,
+                    &digest
+                )
+            }
+        }
+
+        guard let last = digest.last else { return nil }
+        let offset = Int(last & 0x0f)
+        guard offset + 3 < digest.count else { return nil }
+
+        let binary = (UInt32(digest[offset] & 0x7f) << 24)
+            | (UInt32(digest[offset + 1]) << 16)
+            | (UInt32(digest[offset + 2]) << 8)
+            | UInt32(digest[offset + 3])
+
+        let modulo = UInt32(pow(10.0, Double(max(6, min(8, digits)))))
+        let otp = binary % modulo
+        return String(format: "%0*u", max(6, min(8, digits)), otp)
+    }
+
+    static func remainingSeconds(period: Int, date: Date) -> Int {
+        let value = max(1, period)
+        let elapsed = Int(date.timeIntervalSince1970) % value
+        return value - elapsed
+    }
+
+    private static func decodeBase32(_ input: String) -> Data? {
+        let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567")
+        var lookup: [Character: UInt8] = [:]
+        for (index, char) in alphabet.enumerated() {
+            lookup[char] = UInt8(index)
+        }
+
+        let cleaned = input
+            .uppercased()
+            .replacingOccurrences(of: "=", with: "")
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "-", with: "")
+
+        var buffer: UInt32 = 0
+        var bitsLeft: Int = 0
+        var output = Data()
+
+        for char in cleaned {
+            guard let value = lookup[char] else { return nil }
+            buffer = (buffer << 5) | UInt32(value)
+            bitsLeft += 5
+            if bitsLeft >= 8 {
+                let byte = UInt8((buffer >> UInt32(bitsLeft - 8)) & 0xff)
+                output.append(byte)
+                bitsLeft -= 8
+            }
+        }
+
+        return output
+    }
+}
+
+private struct NativeQRCodeScannerView: UIViewControllerRepresentable {
+    let onScanned: (String) -> Void
+    let onCancel: () -> Void
+
+    func makeUIViewController(context: Context) -> QRScannerController {
+        let controller = QRScannerController()
+        controller.onScanned = onScanned
+        controller.onCancel = onCancel
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: QRScannerController, context: Context) {}
+}
+
+private final class QRScannerController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
+    var onScanned: ((String) -> Void)?
+    var onCancel: (() -> Void)?
+
+    private let session = AVCaptureSession()
+    private var previewLayer: AVCaptureVideoPreviewLayer?
+    private var didCapture = false
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+        configureToolbar()
+        configureCamera()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        previewLayer?.frame = view.bounds
+    }
+
+    private func configureToolbar() {
+        let closeButton = UIButton(type: .system)
+        closeButton.setTitle("Close", for: .normal)
+        closeButton.tintColor = .white
+        closeButton.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.addTarget(self, action: #selector(handleClose), for: .touchUpInside)
+        view.addSubview(closeButton)
+
+        NSLayoutConstraint.activate([
+            closeButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            closeButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16)
+        ])
+    }
+
+    private func configureCamera() {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            startCaptureSession()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async {
+                    if granted {
+                        self.startCaptureSession()
+                    } else {
+                        self.onCancel?()
+                    }
+                }
+            }
+        default:
+            onCancel?()
+        }
+    }
+
+    private func startCaptureSession() {
+        guard let device = AVCaptureDevice.default(for: .video),
+              let input = try? AVCaptureDeviceInput(device: device),
+              session.canAddInput(input) else {
+            onCancel?()
+            return
+        }
+
+        session.addInput(input)
+
+        let output = AVCaptureMetadataOutput()
+        guard session.canAddOutput(output) else {
+            onCancel?()
+            return
+        }
+        session.addOutput(output)
+        output.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
+        output.metadataObjectTypes = [.qr]
+
+        let preview = AVCaptureVideoPreviewLayer(session: session)
+        preview.videoGravity = .resizeAspectFill
+        preview.frame = view.bounds
+        view.layer.insertSublayer(preview, at: 0)
+        previewLayer = preview
+
+        session.startRunning()
+    }
+
+    @objc private func handleClose() {
+        session.stopRunning()
+        onCancel?()
+    }
+
+    func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
+        guard !didCapture,
+              let codeObject = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
+              codeObject.type == .qr,
+              let value = codeObject.stringValue,
+              !value.isEmpty else {
+            return
+        }
+
+        didCapture = true
+        session.stopRunning()
+        onScanned?(value)
     }
 }
 
