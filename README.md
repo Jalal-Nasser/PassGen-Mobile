@@ -1,11 +1,13 @@
 # PassGen Mobile - Secure Password Vault & Generator
 
 <p align="center">
-  <img src="assets/screenshots/1.jpg" width="19%" alt="App Screenshot 1" />
-  <img src="assets/screenshots/2.jpg" width="19%" alt="App Screenshot 2" />
-  <img src="assets/screenshots/3.jpg" width="19%" alt="App Screenshot 3" />
-  <img src="assets/screenshots/4.jpg" width="19%" alt="App Screenshot 4" />
-  <img src="assets/screenshots/5.jpg" width="19%" alt="App Screenshot 5" />
+  <img src="assets/screenshots/7.jpg" width="24%" alt="PassGen Vault Login" />
+  <img src="assets/screenshots/6.jpg" width="24%" alt="Secure Generator" />
+  <img src="assets/screenshots/1.jpg" width="24%" alt="Settings - Subscription" />
+  <img src="assets/screenshots/3.jpg" width="24%" alt="Settings - Cloud Backup" />
+  <img src="assets/screenshots/2.jpg" width="24%" alt="Generator Properties" />
+  <img src="assets/screenshots/4.jpg" width="24%" alt="Generator Properties Detailed" />
+  <img src="assets/screenshots/5.jpg" width="24%" alt="Add Vault Entity" />
 </p>
 
 ## What the Project Is About
