@@ -15,18 +15,6 @@
 				"$tsc"
 			],
 			"group": "build"
-		},
-		{
-			"label": "Typecheck (tsc)",
-			"type": "shell",
-			"command": "npx",
-			"args": [
-				"tsc",
-				"-p",
-				"."
-			],
-			"isBackground": false,
-			"group": "build"
 		}
 	]
 }

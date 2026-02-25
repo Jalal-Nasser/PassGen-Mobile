@@ -1,15 +1,8 @@
 node_modules
 dist
-dist-electron
 release
 *.log
 .DS_Store
 .env
 .vercel
 .env*.local
-
-# Dashboard / Activation Tools (Private)
-start-dashboard.bat
-dashboard-server.js
-public/dashboard.html
-scripts/generate-activation.js

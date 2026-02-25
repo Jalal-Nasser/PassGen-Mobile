@@ -4,6 +4,10 @@
   "deno.config": "./supabase/functions/deno.json",
   "typescript.tsdk": "node_modules/typescript/lib",
   "typescript.enablePromptUseWorkspaceTsdk": true,
+  "task.allowAutomaticTasks": "off",
+  "terminal.integrated.enablePersistentSessions": false,
+  "terminal.integrated.persistentSessionReviveProcess": "never",
+  "npm.autoRun": "off",
   "files.exclude": {
     "supabase/functions/tsconfig.json": true
   },
@@ -11,6 +15,5 @@
   "[typescript]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode",
     "editor.formatOnSave": true
-  },
-  "chatgpt.openOnStartup": true
+  }
 }
