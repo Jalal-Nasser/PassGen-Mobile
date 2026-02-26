@@ -1,4 +1,4 @@
-
+﻿
 import UIKit
 import SwiftUI
 import CryptoKit
@@ -1268,6 +1268,11 @@ private final class NativeVaultStore {
 
 @MainActor
 private final class NativeVaultViewModel: ObservableObject {
+    static let companyURL = "https://mdeploy.dev"
+    static let developerURL = "https://github.com/Jalal-Nasser/"
+    static let termsURL = "https://mdeploy.dev/terms"
+    static let privacyURL = "https://mdeploy.dev/privacy"
+
     @Published var isBooting = true
     @Published var showOnboarding = false
     @Published var onboardingIndex = 0
@@ -1582,7 +1587,8 @@ private final class NativeVaultViewModel: ObservableObject {
                 authClient: authClient,
                 provider: .apple,
                 idToken: identityToken,
-                fallbackEmail: credential.email
+                fallbackEmail: credential.email,
+                nonce: nil
             )
         }
     }
@@ -1625,12 +1631,14 @@ private final class NativeVaultViewModel: ObservableObject {
             }
 
             let email = user.profile?.email
+            let nonce = self.extractNonce(fromIDToken: idToken)
             Task { @MainActor in
                 await self.completeSupabaseSignIn(
                     authClient: authClient,
                     provider: .google,
                     idToken: idToken,
-                    fallbackEmail: email
+                    fallbackEmail: email,
+                    nonce: nonce
                 )
             }
         }
@@ -1955,13 +1963,14 @@ private final class NativeVaultViewModel: ObservableObject {
         authClient: SupabaseAuthClient,
         provider: NativeAuthProvider,
         idToken: String,
-        fallbackEmail: String?
+        fallbackEmail: String?,
+        nonce: String?
     ) async {
         authBusy = true
         defer { authBusy = false }
 
         do {
-            let signedInSession = try await authClient.signInWithIDToken(provider: provider, idToken: idToken, nonce: nil)
+            let signedInSession = try await authClient.signInWithIDToken(provider: provider, idToken: idToken, nonce: nonce)
             let providerLabel = provider == .apple ? "Apple" : "Google"
             applySession(signedInSession, providerLabel: providerLabel, fallbackEmail: fallbackEmail)
             alertState = AlertState(message: "Signed in with \(providerLabel).")
@@ -1982,8 +1991,52 @@ private final class NativeVaultViewModel: ObservableObject {
             }
 #endif
         } catch {
-            alertState = AlertState(message: "Sign-in failed: \(error.localizedDescription)")
+            alertState = AlertState(message: signInErrorMessage(provider: provider, error: error))
         }
+    }
+
+    private func signInErrorMessage(provider: NativeAuthProvider, error: Error) -> String {
+        let message = error.localizedDescription
+        if provider == .google && isGoogleNonceMismatch(message: message) {
+            return "Google sign-in token mismatch. Please try again. If it persists, re-authenticate and retry."
+        }
+        return "Sign-in failed: \(message)"
+    }
+
+    private func isGoogleNonceMismatch(message: String) -> Bool {
+        let normalized = message.lowercased()
+        return normalized.contains("nonce in id_token should either both exist or not")
+            || (normalized.contains("passed nonce") && normalized.contains("id_token") && normalized.contains("nonce"))
+    }
+
+    private func extractNonce(fromIDToken idToken: String) -> String? {
+        guard let payload = decodeJWTPayload(idToken),
+              let nonce = payload["nonce"] as? String,
+              !nonce.isEmpty else {
+            return nil
+        }
+        return nonce
+    }
+
+    private func decodeJWTPayload(_ jwt: String) -> [String: Any]? {
+        let segments = jwt.split(separator: ".")
+        guard segments.count >= 2 else { return nil }
+        return decodeBase64URLJSON(String(segments[1]))
+    }
+
+    private func decodeBase64URLJSON(_ value: String) -> [String: Any]? {
+        var base64 = value.replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let remainder = base64.count % 4
+        if remainder > 0 {
+            base64 += String(repeating: "=", count: 4 - remainder)
+        }
+        guard let data = Data(base64Encoded: base64),
+              let json = try? JSONSerialization.jsonObject(with: data, options: []),
+              let payload = json as? [String: Any] else {
+            return nil
+        }
+        return payload
     }
 
     private func refreshSupabaseSessionIfNeeded() {
@@ -2622,6 +2675,21 @@ private final class NativeVaultViewModel: ObservableObject {
         alertState = AlertState(message: "\(label) copied.")
     }
 
+    @MainActor
+    func openExternal(_ urlString: String) {
+        guard let url = URL(string: urlString) else {
+            alertState = AlertState(message: "Unable to open link.")
+            return
+        }
+
+        UIApplication.shared.open(url, options: [:]) { [weak self] success in
+            guard !success else { return }
+            Task { @MainActor in
+                self?.alertState = AlertState(message: "Unable to open link.")
+            }
+        }
+    }
+
     func showComingSoon(_ feature: String) {
         alertState = AlertState(message: "\(feature) will be enabled in the next iOS update.")
     }
@@ -2921,6 +2989,67 @@ private struct NativePlansView: View {
     }
 }
 
+private struct NativeLegalFooterView: View {
+    let onOpenURL: (String) -> Void
+    var onDarkBackground: Bool = false
+
+    private var bodyTextColor: Color {
+        onDarkBackground ? Color.white.opacity(0.9) : .secondary
+    }
+
+    private var linkColor: Color {
+        onDarkBackground ? .white : Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255)
+    }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            (
+                Text("\u{00A9} 2026 ")
+                + Text("mDeploy")
+                    .underline()
+                + Text(". All rights reserved.")
+            )
+            .font(.system(size: 12, weight: .medium))
+            .foregroundColor(bodyTextColor)
+            .onTapGesture {
+                onOpenURL(NativeVaultViewModel.companyURL)
+            }
+
+            (
+                Text("Developed by ")
+                + Text("Jalal Nasser")
+                    .underline()
+            )
+            .font(.system(size: 12, weight: .medium))
+            .foregroundColor(bodyTextColor)
+            .onTapGesture {
+                onOpenURL(NativeVaultViewModel.developerURL)
+            }
+
+            HStack(spacing: 8) {
+                Button("Terms of Service") {
+                    onOpenURL(NativeVaultViewModel.termsURL)
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(linkColor)
+                .buttonStyle(.plain)
+
+                Text("\u{00B7}")
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundColor(bodyTextColor)
+
+                Button("Privacy Policy") {
+                    onOpenURL(NativeVaultViewModel.privacyURL)
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(linkColor)
+                .buttonStyle(.plain)
+            }
+        }
+        .multilineTextAlignment(.center)
+    }
+}
+
 private struct NativeUnlockView: View {
     @ObservedObject var viewModel: NativeVaultViewModel
 
@@ -2935,35 +3064,47 @@ private struct NativeUnlockView: View {
             Text(viewModel.hasVault ? "Unlock your local vault" : "Create your local vault")
                 .foregroundColor(Color.white.opacity(0.9))
 
-            VStack(spacing: 12) {
-                HStack(spacing: 8) {
-                    Group {
-                        if viewModel.showMasterPassword {
-                            TextField("Master Password", text: $viewModel.masterPassword)
-                        } else {
-                            SecureField("Master Password", text: $viewModel.masterPassword)
+            VStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Master Password")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(Color.white.opacity(0.92))
+
+                    HStack(spacing: 8) {
+                        Group {
+                            if viewModel.showMasterPassword {
+                                TextField("Master Password", text: $viewModel.masterPassword)
+                            } else {
+                                SecureField("Master Password", text: $viewModel.masterPassword)
+                            }
                         }
-                    }
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled(true)
-
-                    Button(viewModel.showMasterPassword ? "Hide" : "Show") {
-                        viewModel.showMasterPassword.toggle()
-                    }
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(Color(red: 102 / 255, green: 126 / 255, blue: 234 / 255))
-                }
-                .padding(12)
-                .background(Color.white)
-                .cornerRadius(12)
-
-                if !viewModel.hasVault {
-                    TextField("Password hint (optional)", text: $viewModel.passwordHintInput)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled(true)
-                        .padding(12)
-                        .background(Color.white)
-                        .cornerRadius(12)
+
+                        Button(viewModel.showMasterPassword ? "Hide" : "Show") {
+                            viewModel.showMasterPassword.toggle()
+                        }
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(Color(red: 102 / 255, green: 126 / 255, blue: 234 / 255))
+                    }
+                    .padding(12)
+                    .background(Color.white)
+                    .cornerRadius(12)
+                }
+
+                if !viewModel.hasVault {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Password hint (optional)")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(Color.white.opacity(0.92))
+
+                        TextField("Password hint (optional)", text: $viewModel.passwordHintInput)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled(true)
+                            .padding(12)
+                            .background(Color.white)
+                            .cornerRadius(12)
+                    }
                 } else if !viewModel.passwordHint.isEmpty {
                     Text("Hint: \(viewModel.passwordHint)")
                         .font(.system(size: 14, weight: .medium))
@@ -3000,11 +3141,78 @@ private struct NativeUnlockView: View {
                 .background(Color.white)
                 .foregroundColor(Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
                 .cornerRadius(12)
+
+                VStack(spacing: 10) {
+                    Text("Optional account sign-in")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(Color.white.opacity(0.92))
+
+                    SignInWithAppleButton(.signIn) { request in
+                        request.requestedScopes = [.fullName, .email]
+                    } onCompletion: { result in
+                        switch result {
+                        case .success(let authorization):
+                            if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
+                                viewModel.connectAppleAccount(credential: credential)
+                            } else {
+                                viewModel.alertState = AlertState(message: "Apple sign-in failed: missing Apple ID credential.")
+                            }
+                        case .failure(let error):
+                            viewModel.alertState = AlertState(message: "Apple sign-in failed: \(error.localizedDescription)")
+                        }
+                    }
+                    .signInWithAppleButtonStyle(.black)
+                    .frame(height: 46)
+                    .disabled(viewModel.authBusy)
+
+                    Button {
+                        viewModel.connectGoogleAccount()
+                    } label: {
+                        HStack(spacing: 10) {
+                            GoogleSignInLogoView(size: 20)
+                            Text("Continue with Google")
+                                .font(.system(size: 16, weight: .semibold))
+                            Spacer()
+                            if viewModel.authProviderLabel == "Google" {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11)
+                        .padding(.horizontal, 12)
+                        .background(Color.white)
+                        .foregroundColor(Color(red: 42 / 255, green: 49 / 255, blue: 92 / 255))
+                        .cornerRadius(12)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.authBusy)
+
+                    if viewModel.authBusy {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                                .tint(.white)
+                            Text("Signing in...")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(Color.white.opacity(0.92))
+                        }
+                    }
+
+                    Text("Vault works without sign-in. Sign in for plan and cloud sync features.")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(Color.white.opacity(0.84))
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.top, 4)
             }
             .padding(18)
             .background(Color.white.opacity(0.2))
             .cornerRadius(20)
             .padding(.horizontal, 16)
+
+            NativeLegalFooterView(onOpenURL: viewModel.openExternal, onDarkBackground: true)
+                .padding(.horizontal, 20)
+                .padding(.top, 4)
         }
         .padding(.top, 24)
         .padding(.horizontal, 10)
@@ -3413,6 +3621,12 @@ private struct NativeSettingsTabView: View {
                             .font(.system(size: 12, weight: .regular))
                             .foregroundColor(.secondary)
                     }
+                }
+
+                Section("Legal") {
+                    NativeLegalFooterView(onOpenURL: viewModel.openExternal)
+                        .padding(.vertical, 4)
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
 
                 Section("Security") {
@@ -4201,3 +4415,4 @@ private struct NativeLogoView: View {
         return nil
     }
 }
+
