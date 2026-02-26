@@ -452,12 +452,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         )
 
 #if canImport(GoogleSignIn)
-        if case .success(let runtimeConfig) = runtimeConfigResult {
-            GIDSignIn.sharedInstance.configuration = GIDConfiguration(
-                clientID: runtimeConfig.googleIOSClientID,
-                serverClientID: runtimeConfig.googleServerClientID
-            )
-        }
+        // Configuration is now passed directly during signIn in SDK v7+
 #endif
 
         let rootView = NativeVaultRootView(viewModel: viewModel)
@@ -939,14 +934,14 @@ private enum NativeKeychain {
     }
 
     private static func readMasterPassword(using context: LAContext) -> String? {
+        context.interactionNotAllowed = true
         var item: CFTypeRef?
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
-            kSecUseAuthenticationContext as String: context,
-            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail
+            kSecUseAuthenticationContext as String: context
         ]
 
         let status = SecItemCopyMatching(query as CFDictionary, &item)
@@ -1379,7 +1374,7 @@ private final class NativeVaultViewModel: ObservableObject {
 
     var developerAPISnippet: String {
         let baseURL = runtimeConfig?.supabaseURL.absoluteString ?? "https://<your-project>.supabase.co"
-        """
+        return """
         const PASSGEN_API_KEY = "\(developerAPIKey)";
         const PASSGEN_API_BASE = "\(baseURL)/functions/v1";
         // Use this key from \(selectedDeveloperTarget) with HTTPS requests.
@@ -1605,12 +1600,12 @@ private final class NativeVaultViewModel: ObservableObject {
         }
 
         authBusy = true
-        GIDSignIn.sharedInstance.configuration = GIDConfiguration(
+        let configuration = GIDConfiguration(
             clientID: runtimeConfig.googleIOSClientID,
             serverClientID: runtimeConfig.googleServerClientID
         )
 
-        GIDSignIn.sharedInstance.signIn(withPresenting: presenter) { [weak self] result, error in
+        GIDSignIn.sharedInstance.signIn(with: configuration, presenting: presenter) { [weak self] result, error in
             guard let self = self else { return }
             if let error {
                 DispatchQueue.main.async {
@@ -2097,19 +2092,8 @@ private final class NativeVaultViewModel: ObservableObject {
             throw SupabaseAuthError.requestFailed("Google Drive sync requires Google login.")
         }
 
-        let token = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
-            currentUser.refreshTokensIfNeeded { user, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                guard let accessToken = user?.accessToken.tokenString else {
-                    continuation.resume(throwing: SupabaseAuthError.requestFailed("Google access token is unavailable."))
-                    return
-                }
-                continuation.resume(returning: accessToken)
-            }
-        }
+        let user = try await currentUser.refreshTokensIfNeeded()
+        let token = user.accessToken.tokenString
 
         let fileName = "\(runtimeConfig?.driveAppFolder ?? "PassGenVault")-vault.pgvault"
         let localData = try store.exportEncryptedBlob()
