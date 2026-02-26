@@ -2089,7 +2089,20 @@ private final class NativeVaultViewModel: ObservableObject {
         defer { authBusy = false }
 
         do {
-            let signedInSession = try await authClient.signInWithIDToken(provider: provider, idToken: idToken, nonce: nonce)
+            let signedInSession: SupabaseSession
+            if provider == .google {
+                signedInSession = try await signInWithGoogleNonceFallbacks(
+                    authClient: authClient,
+                    idToken: idToken,
+                    extractedNonce: nonce
+                )
+            } else {
+                signedInSession = try await authClient.signInWithIDToken(
+                    provider: provider,
+                    idToken: idToken,
+                    nonce: nonce
+                )
+            }
             let providerLabel = provider == .apple ? "Apple" : "Google"
             applySession(signedInSession, providerLabel: providerLabel, fallbackEmail: fallbackEmail)
             alertState = AlertState(message: "Signed in with \(providerLabel).")
@@ -2124,8 +2137,72 @@ private final class NativeVaultViewModel: ObservableObject {
 
     private func isGoogleNonceMismatch(message: String) -> Bool {
         let normalized = message.lowercased()
+        if normalized.contains("nonces mismatch") || normalized.contains("nonce mismatch") {
+            return true
+        }
         return normalized.contains("nonce in id_token should either both exist or not")
             || (normalized.contains("passed nonce") && normalized.contains("id_token") && normalized.contains("nonce"))
+    }
+
+    private func signInWithGoogleNonceFallbacks(
+        authClient: SupabaseAuthClient,
+        idToken: String,
+        extractedNonce: String?
+    ) async throws -> SupabaseSession {
+        let candidates = googleNonceCandidates(from: extractedNonce)
+        var lastNonceError: Error? = nil
+
+        for candidate in candidates {
+            do {
+                return try await authClient.signInWithIDToken(
+                    provider: .google,
+                    idToken: idToken,
+                    nonce: candidate
+                )
+            } catch {
+                let message = error.localizedDescription
+                if isGoogleNonceMismatch(message: message) {
+                    lastNonceError = error
+                    continue
+                }
+                throw error
+            }
+        }
+
+        throw lastNonceError ?? SupabaseAuthError.requestFailed("Google sign-in failed.")
+    }
+
+    private func googleNonceCandidates(from extractedNonce: String?) -> [String?] {
+        let normalized = extractedNonce?.trimmingCharacters(in: .whitespacesAndNewlines)
+        var result: [String?] = []
+
+        func appendUnique(_ value: String?) {
+            if result.contains(where: { $0 == value }) { return }
+            result.append(value)
+        }
+
+        if let normalized, !normalized.isEmpty {
+            appendUnique(normalized)
+            appendUnique(sha256Hex(normalized))
+            appendUnique(sha256Base64URL(normalized))
+        }
+
+        appendUnique(nil)
+        return result
+    }
+
+    private func sha256Hex(_ value: String) -> String {
+        let digest = SHA256.hash(data: Data(value.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func sha256Base64URL(_ value: String) -> String {
+        let digest = SHA256.hash(data: Data(value.utf8))
+        let data = Data(digest)
+        return data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
     }
 
     private func extractNonce(fromIDToken idToken: String) -> String? {
