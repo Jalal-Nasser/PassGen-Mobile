@@ -2093,7 +2093,7 @@ private final class NativeVaultViewModel: ObservableObject {
         }
 
         let token = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
-            currentUser.authentication.doWithFreshTokens { authentication, error in
+            currentUser.authentication.do(freshTokens: { authentication, error in
                 if let error {
                     continuation.resume(throwing: error)
                     return
@@ -2103,7 +2103,7 @@ private final class NativeVaultViewModel: ObservableObject {
                     return
                 }
                 continuation.resume(returning: accessToken)
-            }
+            })
         }
 
         let fileName = "\(runtimeConfig?.driveAppFolder ?? "PassGenVault")-vault.pgvault"
