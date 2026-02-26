@@ -1700,7 +1700,7 @@ private final class NativeVaultViewModel: ObservableObject {
         }
     }
 
-    func connectGoogleAccount() {
+    func connectGoogleAccount(forceFresh: Bool = false, allowRetry: Bool = true) {
         guard let runtimeConfig, let authClient else {
             alertState = AlertState(message: runtimeConfigIssue ?? "Mobile runtime config is missing. Add Appflow Native Config values.")
             return
@@ -1710,6 +1710,10 @@ private final class NativeVaultViewModel: ObservableObject {
         guard let presenter = topMostViewController() else {
             alertState = AlertState(message: "Unable to present Google login screen.")
             return
+        }
+
+        if forceFresh {
+            GIDSignIn.sharedInstance.signOut()
         }
 
         authBusy = true
@@ -1740,13 +1744,45 @@ private final class NativeVaultViewModel: ObservableObject {
             let email = user.profile?.email
             let nonce = self.extractNonce(fromIDToken: idToken)
             Task { @MainActor in
-                await self.completeSupabaseSignIn(
-                    authClient: authClient,
-                    provider: .google,
-                    idToken: idToken,
-                    fallbackEmail: email,
-                    nonce: nonce
-                )
+                defer { self.authBusy = false }
+
+                do {
+                    let signedInSession = try await self.signInWithGoogleNonceFallbacks(
+                        authClient: authClient,
+                        idToken: idToken,
+                        extractedNonce: nonce
+                    )
+                    self.applySession(signedInSession, providerLabel: "Google", fallbackEmail: email)
+                    self.alertState = AlertState(message: "Signed in with Google.")
+
+                    if self.isPaidTier {
+                        if let listed = try? await authClient.listMobileAPIKeys(accessToken: signedInSession.accessToken) {
+                            self.apiKeySummaries = listed
+                        }
+                    }
+
+#if canImport(RevenueCat)
+                    do {
+                        try await self.configureRevenueCat()
+                        let info = try await self.fetchRevenueCatCustomerInfo()
+                        self.applyTierFromCustomerInfo(info)
+                    } catch {
+                        // ignore RC sync failures during login
+                    }
+#endif
+                } catch {
+                    if allowRetry && self.isGoogleNonceMismatch(message: error.localizedDescription) {
+                        GIDSignIn.sharedInstance.signOut()
+                        GIDSignIn.sharedInstance.disconnect { _ in
+                            DispatchQueue.main.async {
+                                self.connectGoogleAccount(forceFresh: true, allowRetry: false)
+                            }
+                        }
+                        return
+                    }
+
+                    self.alertState = AlertState(message: self.signInErrorMessage(provider: .google, error: error))
+                }
             }
         }
 #else
@@ -2130,7 +2166,7 @@ private final class NativeVaultViewModel: ObservableObject {
     private func signInErrorMessage(provider: NativeAuthProvider, error: Error) -> String {
         let message = error.localizedDescription
         if provider == .google && isGoogleNonceMismatch(message: message) {
-            return "Google sign-in token mismatch. Please try again. If it persists, re-authenticate and retry."
+            return "Google sign-in token mismatch. In Supabase Dashboard > Authentication > Providers > Google, enable \"Skip nonce checks\", save, then retry."
         }
         return "Sign-in failed: \(message)"
     }
@@ -3358,7 +3394,7 @@ private struct NativeUnlockView: View {
                         }
                     }
                     .signInWithAppleButtonStyle(.black)
-                    .frame(height: 56)
+                    .frame(height: 58)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .disabled(viewModel.authBusy)
                     .opacity(viewModel.authBusy ? 0.68 : 1)
@@ -3663,7 +3699,7 @@ private struct NativeSettingsTabView: View {
                         }
                     }
                     .signInWithAppleButtonStyle(.black)
-                    .frame(height: 56)
+                    .frame(height: 58)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .disabled(viewModel.authBusy)
                     .opacity(viewModel.authBusy ? 0.68 : 1)
@@ -4197,10 +4233,10 @@ private struct NativeGoogleContinueButton: View {
         Button(action: action) {
             ZStack {
                 HStack {
-                    GoogleSignInLogoView(size: 24)
+                    GoogleSignInLogoView(size: 25)
                     Spacer()
                 }
-                .padding(.leading, 18)
+                .padding(.leading, 20)
 
                 Text("Continue with Google")
                     .font(.system(size: 17, weight: .semibold))
@@ -4209,8 +4245,12 @@ private struct NativeGoogleContinueButton: View {
                     .minimumScaleFactor(0.85)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 56)
+            .frame(height: 58)
             .background(Color.black)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
+            )
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -4223,28 +4263,42 @@ private struct GoogleSignInLogoView: View {
     let size: CGFloat
 
     var body: some View {
-        Group {
-            if let url = URL(string: "https://www.gstatic.com/images/branding/product/1x/googleg_standard_color_18dp.png") {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFit()
-                    default:
-                        Text("G")
-                            .font(.system(size: size * 0.82, weight: .bold))
-                            .foregroundColor(Color(red: 66 / 255, green: 133 / 255, blue: 244 / 255))
-                    }
+        GeometryReader { geometry in
+            let side = min(geometry.size.width, geometry.size.height)
+            let lineWidth = side * 0.24
+            let radius = (side - lineWidth) / 2
+            let center = CGPoint(x: side / 2, y: side / 2)
+
+            ZStack {
+                arc(center: center, radius: radius, start: -45, end: 45)
+                    .stroke(Color(red: 66 / 255, green: 133 / 255, blue: 244 / 255), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                arc(center: center, radius: radius, start: 45, end: 140)
+                    .stroke(Color(red: 219 / 255, green: 68 / 255, blue: 55 / 255), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                arc(center: center, radius: radius, start: 140, end: 215)
+                    .stroke(Color(red: 244 / 255, green: 180 / 255, blue: 0 / 255), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                arc(center: center, radius: radius, start: 215, end: 315)
+                    .stroke(Color(red: 15 / 255, green: 157 / 255, blue: 88 / 255), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+
+                Path { path in
+                    path.move(to: CGPoint(x: side * 0.53, y: side * 0.5))
+                    path.addLine(to: CGPoint(x: side * 0.88, y: side * 0.5))
                 }
-            } else {
-                Text("G")
-                    .font(.system(size: size * 0.82, weight: .bold))
-                    .foregroundColor(Color(red: 66 / 255, green: 133 / 255, blue: 244 / 255))
+                .stroke(Color(red: 66 / 255, green: 133 / 255, blue: 244 / 255), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
             }
         }
         .frame(width: size, height: size)
-        .background(Circle().fill(Color.white))
+    }
+
+    private func arc(center: CGPoint, radius: CGFloat, start: Double, end: Double) -> Path {
+        var path = Path()
+        path.addArc(
+            center: center,
+            radius: radius,
+            startAngle: .degrees(start),
+            endAngle: .degrees(end),
+            clockwise: false
+        )
+        return path
     }
 }
 
