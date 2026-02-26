@@ -3704,7 +3704,7 @@ private struct NativeEntryEditorView: View {
                 viewModel.applyTOTPFromURI(scanned)
             }, onCancel: {
                 showQRCodeScanner = false
-            }
+            })
         }
         .onReceive(timer) { value in
             now = value
