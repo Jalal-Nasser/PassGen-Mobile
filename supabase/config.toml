@@ -47,6 +47,9 @@ verify_jwt = true
 [functions."mobile-api-keys-revoke"]
 verify_jwt = true
 
+[functions."mobile-api-keys-verify"]
+verify_jwt = false
+
 [functions."revenuecat-webhook"]
 verify_jwt = false
 

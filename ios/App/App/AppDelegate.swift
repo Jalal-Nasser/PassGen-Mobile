@@ -187,20 +187,20 @@ private struct SupabaseErrorResponse: Decodable {
 }
 
 private struct APIKeyCreateResponse: Decodable {
+    let id: String
     let key: String
     let prefix: String
+    let created_at: String?
 }
 
 private struct APIKeyListResponse: Decodable {
     let keys: [MobileAPIKeySummaryDTO]
-}
-
-private struct APIKeyListItemResponse: Decodable {
-    let keys: [MobileAPIKeySummaryDTO]
+    let active_count: Int?
 }
 
 private struct APIKeyRevocationResponse: Decodable {
     let ok: Bool
+    let revoked_id: String?
 }
 
 private struct MobileAPIKeySummaryDTO: Decodable {
@@ -247,6 +247,50 @@ private enum NativeSessionKeychain {
         }
 
         return session
+    }
+
+    static func delete() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+}
+
+private enum NativeDeveloperAPIKeyKeychain {
+    private static let service = "com.passgen.native.ios.developer-api-key"
+    private static let account = "developer-api-key"
+
+    static func save(_ key: String) {
+        delete()
+        guard let data = key.data(using: .utf8) else { return }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+            kSecValueData as String: data
+        ]
+        SecItemAdd(query as CFDictionary, nil)
+    }
+
+    static func read() -> String? {
+        var item: CFTypeRef?
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status == errSecSuccess,
+              let data = item as? Data else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
     }
 
     static func delete() {
@@ -1304,7 +1348,7 @@ private final class NativeVaultViewModel: ObservableObject {
     @Published var planBusy = false
     @Published var developerAPIKey = ""
     @Published var apiKeySummaries: [MobileAPIKeySummary] = []
-    @Published var selectedDeveloperTarget = "Vercel"
+    @Published var selectedDeveloperTarget = "Vercel v0"
 
     @Published var generatedPassword = ""
     @Published var length = 18
@@ -1319,7 +1363,6 @@ private final class NativeVaultViewModel: ObservableObject {
     private let passkeyEnabledStorageKey = "passgen-passkey-enabled-native"
     private let authProviderStorageKey = "passgen-auth-provider-native"
     private let authEmailStorageKey = "passgen-auth-email-native"
-    private let developerAPIKeyStorageKey = "passgen-dev-api-key-native"
     private let cloudProviderStorageKey = "passgen-cloud-provider-native"
     private let cloudSyncAtStorageKey = "passgen-cloud-sync-at-native"
     private let store = NativeVaultStore()
@@ -1374,16 +1417,80 @@ private final class NativeVaultViewModel: ObservableObject {
     }
 
     var developerTargets: [String] {
-        ["Vercel", "Replit", "VS Code Mobile"]
+        ["Vercel v0", "Replit", "VS Code", "Bolt"]
+    }
+
+    var activeDeveloperAPIKeyCount: Int {
+        apiKeySummaries.filter { !$0.isRevoked }.count
     }
 
     var developerAPISnippet: String {
         let baseURL = runtimeConfig?.supabaseURL.absoluteString ?? "https://<your-project>.supabase.co"
-        return """
-        const PASSGEN_API_KEY = "\(developerAPIKey)";
-        const PASSGEN_API_BASE = "\(baseURL)/functions/v1";
-        // Use this key from \(selectedDeveloperTarget) with HTTPS requests.
-        """
+        let verifyURL = "\(baseURL)/functions/v1/mobile-api-keys-verify"
+
+        switch selectedDeveloperTarget {
+        case "Vercel v0":
+            return """
+            // Vercel v0 / Next.js (server-only)
+            // 1) Add PASSGEN_API_KEY in Vercel Project Settings -> Environment Variables.
+            // 2) Never expose PASSGEN_API_KEY in client components or browser logs.
+            const PASSGEN_API_KEY = process.env.PASSGEN_API_KEY;
+            const PASSGEN_VERIFY_URL = "\(verifyURL)";
+
+            export async function verifyPassGenKey() {
+              const response = await fetch(PASSGEN_VERIFY_URL, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${PASSGEN_API_KEY}` }
+              });
+              return response.json();
+            }
+            """
+        case "Replit":
+            return """
+            # Replit setup
+            # 1) Add PASSGEN_API_KEY in Replit Secrets.
+            # 2) Keep key in backend code only.
+            PASSGEN_API_KEY=\(developerAPIKey)
+            PASSGEN_VERIFY_URL=\(verifyURL)
+
+            // Node.js backend usage
+            const response = await fetch(process.env.PASSGEN_VERIFY_URL, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${process.env.PASSGEN_API_KEY}` }
+            });
+            """
+        case "VS Code":
+            return """
+            # VS Code local dev (.env)
+            PASSGEN_API_KEY=\(developerAPIKey)
+            PASSGEN_VERIFY_URL=\(verifyURL)
+
+            // Express/Fastify backend usage
+            const response = await fetch(process.env.PASSGEN_VERIFY_URL, {
+              method: "POST",
+              headers: { "x-passgen-api-key": process.env.PASSGEN_API_KEY }
+            });
+            """
+        case "Bolt":
+            return """
+            # Bolt setup
+            # 1) Add PASSGEN_API_KEY as a project secret.
+            # 2) Use only in server actions/functions.
+            PASSGEN_API_KEY=\(developerAPIKey)
+            PASSGEN_VERIFY_URL=\(verifyURL)
+
+            const response = await fetch(process.env.PASSGEN_VERIFY_URL, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${process.env.PASSGEN_API_KEY}` }
+            });
+            """
+        default:
+            return """
+            const PASSGEN_API_KEY = "\(developerAPIKey)";
+            const PASSGEN_VERIFY_URL = "\(verifyURL)";
+            // Keep this key server-side only. Do not log or expose it to clients.
+            """
+        }
     }
 
     var selectedWebsiteName: String {
@@ -1431,7 +1538,7 @@ private final class NativeVaultViewModel: ObservableObject {
         passkeyUnlockEnabled = UserDefaults.standard.bool(forKey: passkeyEnabledStorageKey)
         authProviderLabel = UserDefaults.standard.string(forKey: authProviderStorageKey) ?? "Not Connected"
         authEmail = UserDefaults.standard.string(forKey: authEmailStorageKey) ?? ""
-        developerAPIKey = UserDefaults.standard.string(forKey: developerAPIKeyStorageKey) ?? ""
+        developerAPIKey = NativeDeveloperAPIKeyKeychain.read() ?? ""
         if let providerRaw = UserDefaults.standard.string(forKey: cloudProviderStorageKey),
            let provider = CloudSyncProvider(rawValue: providerRaw) {
             cloudSyncProvider = provider
@@ -1655,7 +1762,7 @@ private final class NativeVaultViewModel: ObservableObject {
         developerAPIKey = ""
         UserDefaults.standard.removeObject(forKey: authProviderStorageKey)
         UserDefaults.standard.removeObject(forKey: authEmailStorageKey)
-        UserDefaults.standard.removeObject(forKey: developerAPIKeyStorageKey)
+        NativeDeveloperAPIKeyKeychain.delete()
         NativeSessionKeychain.delete()
 
 #if canImport(GoogleSignIn)
@@ -1697,7 +1804,7 @@ private final class NativeVaultViewModel: ObservableObject {
 
                 developerAPIKey = created.key
                 apiKeySummaries = listed
-                UserDefaults.standard.set(developerAPIKey, forKey: developerAPIKeyStorageKey)
+                NativeDeveloperAPIKeyKeychain.save(developerAPIKey)
                 alertState = AlertState(message: "Developer API key generated from Supabase.")
             } catch {
                 alertState = AlertState(message: "Unable to generate API key: \(error.localizedDescription)")
@@ -1705,23 +1812,35 @@ private final class NativeVaultViewModel: ObservableObject {
         }
     }
 
-    func revokeDeveloperAPIKey() {
+    func revokeDeveloperAPIKey(keyID: String? = nil) {
         guard let authClient, let activeSession = session else {
             developerAPIKey = ""
-            UserDefaults.standard.removeObject(forKey: developerAPIKeyStorageKey)
+            NativeDeveloperAPIKeyKeychain.delete()
             alertState = AlertState(message: "Developer API key revoked locally.")
+            return
+        }
+
+        let targetKeyID = keyID ?? apiKeySummaries.first(where: { !$0.isRevoked })?.id
+        guard let targetKeyID else {
+            alertState = AlertState(message: "No active API key available to revoke.")
             return
         }
 
         Task {
             do {
                 let session = try await refreshedSessionIfNeeded(activeSession)
-                if let keyID = apiKeySummaries.first(where: { !$0.isRevoked })?.id {
-                    try await authClient.revokeMobileAPIKey(accessToken: session.accessToken, keyID: keyID)
-                }
+                let revokedKeyPrefix = apiKeySummaries.first(where: { $0.id == targetKeyID })?.keyPrefix
+                try await authClient.revokeMobileAPIKey(accessToken: session.accessToken, keyID: targetKeyID)
                 apiKeySummaries = try await authClient.listMobileAPIKeys(accessToken: session.accessToken)
-                developerAPIKey = ""
-                UserDefaults.standard.removeObject(forKey: developerAPIKeyStorageKey)
+
+                let shouldClearVisibleKey = revokedKeyPrefix.map { prefix in
+                    !developerAPIKey.isEmpty && developerAPIKey.hasPrefix(prefix)
+                } ?? false
+                if shouldClearVisibleKey || activeDeveloperAPIKeyCount == 0 {
+                    developerAPIKey = ""
+                    NativeDeveloperAPIKeyKeychain.delete()
+                }
+
                 alertState = AlertState(message: "Developer API key revoked.")
             } catch {
                 alertState = AlertState(message: "Unable to revoke API key: \(error.localizedDescription)")
@@ -2742,11 +2861,11 @@ private final class NativeVaultViewModel: ObservableObject {
             UserDefaults.standard.removeObject(forKey: passkeyEnabledStorageKey)
             UserDefaults.standard.removeObject(forKey: authProviderStorageKey)
             UserDefaults.standard.removeObject(forKey: authEmailStorageKey)
-            UserDefaults.standard.removeObject(forKey: developerAPIKeyStorageKey)
             UserDefaults.standard.removeObject(forKey: cloudProviderStorageKey)
             UserDefaults.standard.removeObject(forKey: cloudSyncAtStorageKey)
             NativeKeychain.deleteMasterPassword()
             NativeSessionKeychain.delete()
+            NativeDeveloperAPIKeyKeychain.delete()
             stopCloudSyncTimer()
 
             hasVault = false
@@ -3147,7 +3266,7 @@ private struct NativeUnlockView: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(Color.white.opacity(0.92))
 
-                    SignInWithAppleButton(.signIn) { request in
+                    SignInWithAppleButton(.continue) { request in
                         request.requestedScopes = [.fullName, .email]
                     } onCompletion: { result in
                         switch result {
@@ -3162,31 +3281,14 @@ private struct NativeUnlockView: View {
                         }
                     }
                     .signInWithAppleButtonStyle(.black)
-                    .frame(height: 46)
+                    .frame(height: 56)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .disabled(viewModel.authBusy)
+                    .opacity(viewModel.authBusy ? 0.68 : 1)
 
-                    Button {
+                    NativeGoogleContinueButton(action: {
                         viewModel.connectGoogleAccount()
-                    } label: {
-                        HStack(spacing: 10) {
-                            GoogleSignInLogoView(size: 20)
-                            Text("Continue with Google")
-                                .font(.system(size: 16, weight: .semibold))
-                            Spacer()
-                            if viewModel.authProviderLabel == "Google" {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundColor(Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 11)
-                        .padding(.horizontal, 12)
-                        .background(Color.white)
-                        .foregroundColor(Color(red: 42 / 255, green: 49 / 255, blue: 92 / 255))
-                        .cornerRadius(12)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(viewModel.authBusy)
+                    }, disabled: viewModel.authBusy)
 
                     if viewModel.authBusy {
                         HStack(spacing: 10) {
@@ -3469,7 +3571,7 @@ private struct NativeSettingsTabView: View {
                             .foregroundColor(.secondary)
                     }
 
-                    SignInWithAppleButton(.signIn) { request in
+                    SignInWithAppleButton(.continue) { request in
                         request.requestedScopes = [.fullName, .email]
                     } onCompletion: { result in
                         switch result {
@@ -3484,22 +3586,14 @@ private struct NativeSettingsTabView: View {
                         }
                     }
                     .signInWithAppleButtonStyle(.black)
-                    .frame(height: 46)
-
-                    Button {
-                        viewModel.connectGoogleAccount()
-                    } label: {
-                        HStack(spacing: 10) {
-                            GoogleSignInLogoView(size: 20)
-                            Text("Continue with Google")
-                            Spacer()
-                            if viewModel.authProviderLabel == "Google" {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundColor(Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
-                            }
-                        }
-                    }
+                    .frame(height: 56)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .disabled(viewModel.authBusy)
+                    .opacity(viewModel.authBusy ? 0.68 : 1)
+
+                    NativeGoogleContinueButton(action: {
+                        viewModel.connectGoogleAccount()
+                    }, disabled: viewModel.authBusy)
 
                     if viewModel.authBusy {
                         HStack(spacing: 10) {
@@ -3524,10 +3618,15 @@ private struct NativeSettingsTabView: View {
                             }
                         }
 
+                        Text("Active keys: \(viewModel.activeDeveloperAPIKeyCount)/3")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+
                         if viewModel.developerAPIKey.isEmpty {
                             Button("Generate API Key") {
                                 viewModel.generateDeveloperAPIKey()
                             }
+                            .disabled(viewModel.activeDeveloperAPIKeyCount >= 3)
                         } else {
                             Text(viewModel.developerAPIKey)
                                 .font(.system(.footnote, design: .monospaced))
@@ -3540,21 +3639,28 @@ private struct NativeSettingsTabView: View {
                             Button("Copy \(viewModel.selectedDeveloperTarget) Snippet") {
                                 viewModel.copyToClipboard(viewModel.developerAPISnippet, label: "API snippet")
                             }
-
-                            Button("Revoke API Key", role: .destructive) {
-                                viewModel.revokeDeveloperAPIKey()
-                            }
                         }
 
                         if !viewModel.apiKeySummaries.isEmpty {
                             ForEach(viewModel.apiKeySummaries) { key in
                                 HStack {
-                                    Text(key.keyPrefix)
-                                        .font(.system(.footnote, design: .monospaced))
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(key.keyPrefix)
+                                            .font(.system(.footnote, design: .monospaced))
+                                        Text(key.label)
+                                            .font(.system(size: 11, weight: .regular))
+                                            .foregroundColor(.secondary)
+                                    }
                                     Spacer()
                                     Text(key.isRevoked ? "Revoked" : "Active")
                                         .font(.system(size: 12, weight: .semibold))
                                         .foregroundColor(key.isRevoked ? .red : .green)
+                                    if !key.isRevoked {
+                                        Button("Revoke", role: .destructive) {
+                                            viewModel.revokeDeveloperAPIKey(keyID: key.id)
+                                        }
+                                        .font(.system(size: 12, weight: .semibold))
+                                    }
                                 }
                             }
                         }
@@ -4003,6 +4109,36 @@ private struct NativeWebsitePickerView: View {
                 searchFocused = true
             }
         }
+    }
+}
+
+private struct NativeGoogleContinueButton: View {
+    let action: () -> Void
+    var disabled: Bool = false
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                HStack {
+                    GoogleSignInLogoView(size: 24)
+                    Spacer()
+                }
+                .padding(.leading, 18)
+
+                Text("Continue with Google")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 56)
+            .background(Color.black)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.68 : 1)
     }
 }
 
