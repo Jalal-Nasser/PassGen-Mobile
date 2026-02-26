@@ -1605,7 +1605,7 @@ private final class NativeVaultViewModel: ObservableObject {
             serverClientID: runtimeConfig.googleServerClientID
         )
 
-        GIDSignIn.sharedInstance.signIn(with: configuration, presenting: presenter) { [weak self] result, error in
+        GIDSignIn.sharedInstance.signIn(with: configuration, presenting: presenter) { [weak self] user, error in
             guard let self = self else { return }
             if let error {
                 DispatchQueue.main.async {
@@ -1615,8 +1615,8 @@ private final class NativeVaultViewModel: ObservableObject {
                 return
             }
 
-            guard let result,
-                  let idToken = result.user.idToken?.tokenString else {
+            guard let user = user,
+                  let idToken = user.authentication.idToken else {
                 DispatchQueue.main.async {
                     self.authBusy = false
                     self.alertState = AlertState(message: "Google sign-in failed: missing ID token.")
@@ -1624,7 +1624,7 @@ private final class NativeVaultViewModel: ObservableObject {
                 return
             }
 
-            let email = result.user.profile?.email
+            let email = user.profile?.email
             Task { @MainActor in
                 await self.completeSupabaseSignIn(
                     authClient: authClient,
@@ -2092,8 +2092,19 @@ private final class NativeVaultViewModel: ObservableObject {
             throw SupabaseAuthError.requestFailed("Google Drive sync requires Google login.")
         }
 
-        let user = try await currentUser.refreshTokensIfNeeded()
-        let token = user.accessToken.tokenString
+        let token = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+            currentUser.authentication.doWithFreshTokens { authentication, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let accessToken = authentication?.accessToken else {
+                    continuation.resume(throwing: SupabaseAuthError.requestFailed("Google access token is unavailable."))
+                    return
+                }
+                continuation.resume(returning: accessToken)
+            }
+        }
 
         let fileName = "\(runtimeConfig?.driveAppFolder ?? "PassGenVault")-vault.pgvault"
         let localData = try store.exportEncryptedBlob()
