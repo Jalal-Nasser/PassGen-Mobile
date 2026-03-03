@@ -3401,9 +3401,7 @@ private struct NativeUnlockView: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(Color.white.opacity(0.92))
                     HStack(spacing: 14) {
-                        SignInWithAppleButton(.continue) { request in
-                            request.requestedScopes = [.fullName, .email]
-                        } onCompletion: { result in
+                        NativeAppleIconButton(disabled: viewModel.authBusy) { result in
                             switch result {
                             case .success(let authorization):
                                 if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
@@ -3415,12 +3413,6 @@ private struct NativeUnlockView: View {
                                 viewModel.alertState = AlertState(message: "Apple sign-in failed: \(error.localizedDescription)")
                             }
                         }
-                        .signInWithAppleButtonStyle(.black)
-                        .frame(width: 56, height: 56)
-                        .clipShape(Circle())
-                        .disabled(viewModel.authBusy)
-                        .opacity(viewModel.authBusy ? 0.68 : 1)
-                        .accessibilityLabel("Continue with Apple")
 
                         NativeGoogleIconButton(action: {
                             viewModel.connectGoogleAccount()
@@ -3709,9 +3701,7 @@ private struct NativeSettingsTabView: View {
                             .foregroundColor(.secondary)
                     }
                     HStack(spacing: 14) {
-                        SignInWithAppleButton(.continue) { request in
-                            request.requestedScopes = [.fullName, .email]
-                        } onCompletion: { result in
+                        NativeAppleIconButton(disabled: viewModel.authBusy) { result in
                             switch result {
                             case .success(let authorization):
                                 if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
@@ -3723,12 +3713,6 @@ private struct NativeSettingsTabView: View {
                                 viewModel.alertState = AlertState(message: "Apple sign-in failed: \(error.localizedDescription)")
                             }
                         }
-                        .signInWithAppleButtonStyle(.black)
-                        .frame(width: 56, height: 56)
-                        .clipShape(Circle())
-                        .disabled(viewModel.authBusy)
-                        .opacity(viewModel.authBusy ? 0.68 : 1)
-                        .accessibilityLabel("Continue with Apple")
 
                         NativeGoogleIconButton(action: {
                             viewModel.connectGoogleAccount()
@@ -4253,20 +4237,65 @@ private struct NativeWebsitePickerView: View {
     }
 }
 
+private struct NativeAppleIconButton: View {
+    var disabled: Bool = false
+    let onCompletion: (Result<ASAuthorization, Error>) -> Void
+
+    var body: some View {
+        ZStack {
+            SignInWithAppleButton(.continue) { request in
+                request.requestedScopes = [.fullName, .email]
+            } onCompletion: { result in
+                onCompletion(result)
+            }
+            .signInWithAppleButtonStyle(.black)
+            .frame(width: 56, height: 56)
+            .opacity(0.02)
+
+            Circle()
+                .fill(Color.black)
+                .allowsHitTesting(false)
+
+            Image(systemName: "applelogo")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundColor(.white)
+                .allowsHitTesting(false)
+        }
+        .frame(width: 56, height: 56)
+        .clipShape(Circle())
+        .overlay(
+            Circle()
+                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+        )
+        .disabled(disabled)
+        .opacity(disabled ? 0.68 : 1)
+        .accessibilityLabel("Continue with Apple")
+    }
+}
+
 private struct NativeGoogleIconButton: View {
     let action: () -> Void
     var disabled: Bool = false
 
     var body: some View {
         Button(action: action) {
-            GoogleSignInLogoView(size: 24)
-                .frame(width: 56, height: 56)
-                .background(Color.white)
-                .clipShape(Circle())
-                .overlay(
-                    Circle()
-                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                )
+            ZStack {
+                Circle().fill(Color.white)
+
+                if UIImage(named: "GoogleGIcon") != nil {
+                    Image("GoogleGIcon")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 24, height: 24)
+                } else {
+                    GoogleSignInLogoView(size: 24)
+                }
+            }
+            .frame(width: 56, height: 56)
+            .overlay(
+                Circle()
+                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
         .disabled(disabled)
@@ -4698,6 +4727,3 @@ private struct NativeLogoView: View {
         return nil
     }
 }
-
-
-
