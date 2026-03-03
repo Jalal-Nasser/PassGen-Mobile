@@ -3284,6 +3284,7 @@ private struct NativeLegalFooterView: View {
 
 private struct NativeUnlockView: View {
     @ObservedObject var viewModel: NativeVaultViewModel
+    @State private var showSavedHint = false
 
     var body: some View {
         VStack(spacing: 18) {
@@ -3338,13 +3339,34 @@ private struct NativeUnlockView: View {
                             .cornerRadius(12)
                     }
                 } else if !viewModel.passwordHint.isEmpty {
-                    Text("Hint: \(viewModel.passwordHint)")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(Color(red: 42 / 255, green: 49 / 255, blue: 92 / 255))
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.white.opacity(0.92))
-                        .cornerRadius(12)
+                    VStack(spacing: 8) {
+                        HStack {
+                            Spacer()
+                            Button {
+                                showSavedHint.toggle()
+                            } label: {
+                                Image(systemName: showSavedHint ? "lightbulb.fill" : "lightbulb")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundColor(Color(red: 42 / 255, green: 49 / 255, blue: 92 / 255))
+                                    .frame(width: 40, height: 40)
+                                    .background(Color.white.opacity(0.95))
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Show password hint")
+                            Spacer()
+                        }
+
+                        if showSavedHint {
+                            Text(viewModel.passwordHint)
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(Color(red: 42 / 255, green: 49 / 255, blue: 92 / 255))
+                                .padding(10)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.white.opacity(0.92))
+                                .cornerRadius(12)
+                        }
+                    }
                 }
 
                 if viewModel.hasVault && viewModel.passkeyUnlockEnabled {
@@ -3378,30 +3400,33 @@ private struct NativeUnlockView: View {
                     Text("Optional account sign-in")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(Color.white.opacity(0.92))
-
-                    SignInWithAppleButton(.continue) { request in
-                        request.requestedScopes = [.fullName, .email]
-                    } onCompletion: { result in
-                        switch result {
-                        case .success(let authorization):
-                            if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
-                                viewModel.connectAppleAccount(credential: credential)
-                            } else {
-                                viewModel.alertState = AlertState(message: "Apple sign-in failed: missing Apple ID credential.")
+                    HStack(spacing: 14) {
+                        SignInWithAppleButton(.continue) { request in
+                            request.requestedScopes = [.fullName, .email]
+                        } onCompletion: { result in
+                            switch result {
+                            case .success(let authorization):
+                                if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
+                                    viewModel.connectAppleAccount(credential: credential)
+                                } else {
+                                    viewModel.alertState = AlertState(message: "Apple sign-in failed: missing Apple ID credential.")
+                                }
+                            case .failure(let error):
+                                viewModel.alertState = AlertState(message: "Apple sign-in failed: \(error.localizedDescription)")
                             }
-                        case .failure(let error):
-                            viewModel.alertState = AlertState(message: "Apple sign-in failed: \(error.localizedDescription)")
                         }
-                    }
-                    .signInWithAppleButtonStyle(.black)
-                    .frame(height: 58)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .disabled(viewModel.authBusy)
-                    .opacity(viewModel.authBusy ? 0.68 : 1)
+                        .signInWithAppleButtonStyle(.black)
+                        .frame(width: 56, height: 56)
+                        .clipShape(Circle())
+                        .disabled(viewModel.authBusy)
+                        .opacity(viewModel.authBusy ? 0.68 : 1)
+                        .accessibilityLabel("Continue with Apple")
 
-                    NativeGoogleContinueButton(action: {
-                        viewModel.connectGoogleAccount()
-                    }, disabled: viewModel.authBusy)
+                        NativeGoogleIconButton(action: {
+                            viewModel.connectGoogleAccount()
+                        }, disabled: viewModel.authBusy)
+                    }
+                    .frame(maxWidth: .infinity)
 
                     if viewModel.authBusy {
                         HStack(spacing: 10) {
@@ -3683,30 +3708,33 @@ private struct NativeSettingsTabView: View {
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(.secondary)
                     }
-
-                    SignInWithAppleButton(.continue) { request in
-                        request.requestedScopes = [.fullName, .email]
-                    } onCompletion: { result in
-                        switch result {
-                        case .success(let authorization):
-                            if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
-                                viewModel.connectAppleAccount(credential: credential)
-                            } else {
-                                viewModel.alertState = AlertState(message: "Apple sign-in failed: missing Apple ID credential.")
+                    HStack(spacing: 14) {
+                        SignInWithAppleButton(.continue) { request in
+                            request.requestedScopes = [.fullName, .email]
+                        } onCompletion: { result in
+                            switch result {
+                            case .success(let authorization):
+                                if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
+                                    viewModel.connectAppleAccount(credential: credential)
+                                } else {
+                                    viewModel.alertState = AlertState(message: "Apple sign-in failed: missing Apple ID credential.")
+                                }
+                            case .failure(let error):
+                                viewModel.alertState = AlertState(message: "Apple sign-in failed: \(error.localizedDescription)")
                             }
-                        case .failure(let error):
-                            viewModel.alertState = AlertState(message: "Apple sign-in failed: \(error.localizedDescription)")
                         }
-                    }
-                    .signInWithAppleButtonStyle(.black)
-                    .frame(height: 58)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .disabled(viewModel.authBusy)
-                    .opacity(viewModel.authBusy ? 0.68 : 1)
+                        .signInWithAppleButtonStyle(.black)
+                        .frame(width: 56, height: 56)
+                        .clipShape(Circle())
+                        .disabled(viewModel.authBusy)
+                        .opacity(viewModel.authBusy ? 0.68 : 1)
+                        .accessibilityLabel("Continue with Apple")
 
-                    NativeGoogleContinueButton(action: {
-                        viewModel.connectGoogleAccount()
-                    }, disabled: viewModel.authBusy)
+                        NativeGoogleIconButton(action: {
+                            viewModel.connectGoogleAccount()
+                        }, disabled: viewModel.authBusy)
+                    }
+                    .frame(maxWidth: .infinity)
 
                     if viewModel.authBusy {
                         HStack(spacing: 10) {
@@ -4225,37 +4253,25 @@ private struct NativeWebsitePickerView: View {
     }
 }
 
-private struct NativeGoogleContinueButton: View {
+private struct NativeGoogleIconButton: View {
     let action: () -> Void
     var disabled: Bool = false
 
     var body: some View {
         Button(action: action) {
-            ZStack {
-                HStack {
-                    GoogleSignInLogoView(size: 25)
-                    Spacer()
-                }
-                .padding(.leading, 20)
-
-                Text("Continue with Google")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 58)
-            .background(Color.black)
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            GoogleSignInLogoView(size: 24)
+                .frame(width: 56, height: 56)
+                .background(Color.white)
+                .clipShape(Circle())
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                )
         }
         .buttonStyle(.plain)
         .disabled(disabled)
         .opacity(disabled ? 0.68 : 1)
+        .accessibilityLabel("Continue with Google")
     }
 }
 
@@ -4682,4 +4698,6 @@ private struct NativeLogoView: View {
         return nil
     }
 }
+
+
 
