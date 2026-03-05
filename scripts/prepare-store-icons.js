@@ -28,7 +28,6 @@ async function ensureStoreIcons() {
     fs.mkdirSync(appxDir, { recursive: true })
   }
 
-  const transparentKeyThreshold = 8
   const renderIconBuffer = async (width, height) => {
     return sharp(srcIcon)
       .resize(width, height, {
@@ -55,29 +54,6 @@ async function ensureStoreIcons() {
   fs.writeFileSync(icoPath, icoBuffer)
   console.log(`Generated: ${icoPath}`)
 
-  // StoreLogo needs a solid purple background for the Microsoft Store listing
-  const renderStoreLogoBuffer = async (width, height) => {
-    const iconBuffer = await renderIconBuffer(width, height)
-    // Padding: icon fills 70% of the tile, centered
-    const iconSize = Math.round(width * 0.7)
-    const padding = Math.round((width - iconSize) / 2)
-    return sharp({
-      create: {
-        width,
-        height,
-        channels: 4,
-        background: { r: 124, g: 58, b: 237, alpha: 1 } // #7C3AED purple
-      }
-    })
-      .composite([{
-        input: await sharp(srcIcon).resize(iconSize, iconSize, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer(),
-        top: padding,
-        left: padding
-      }])
-      .png()
-      .toBuffer()
-  }
-
   const appxAssets = [
     { name: 'Square44x44Logo.png', width: 44, height: 44 },
     { name: 'Square150x150Logo.png', width: 150, height: 150 },
@@ -92,11 +68,11 @@ async function ensureStoreIcons() {
     console.log(`Generated: ${targetPath}`)
   }
 
-  // StoreLogo with solid purple background
+  // Keep StoreLogo transparent to avoid forced background color in Store/taskbar tiles.
   const storeLogoPath = path.join(appxDir, 'StoreLogo.png')
-  const storeBuffer = await renderStoreLogoBuffer(50, 50)
+  const storeBuffer = await renderIconBuffer(50, 50)
   fs.writeFileSync(storeLogoPath, storeBuffer)
-  console.log(`Generated: ${storeLogoPath} (with purple background)`)
+  console.log(`Generated: ${storeLogoPath}`)
 }
 
 ensureStoreIcons().catch((error) => {
