@@ -1166,10 +1166,10 @@ function createWindow() {
   }
 
   mainWindow = new BrowserWindow({
-    width: 900,
-    height: 680,
-    minWidth: 800,
-    minHeight: 600,
+    width: 980,
+    height: 760,
+    minWidth: 860,
+    minHeight: 680,
     frame: false,
     icon: resolveIconPath(),
     webPreferences: {

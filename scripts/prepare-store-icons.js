@@ -28,6 +28,11 @@ async function ensureStoreIcons() {
     fs.mkdirSync(appxDir, { recursive: true })
   }
 
+  const writePng = (filePath, buffer) => {
+    fs.writeFileSync(filePath, buffer)
+    console.log(`Generated: ${filePath}`)
+  }
+
   const renderIconBuffer = async (width, height) => {
     return sharp(srcIcon)
       .resize(width, height, {
@@ -44,8 +49,7 @@ async function ensureStoreIcons() {
   for (const size of sizes) {
     const targetPath = path.join(buildDir, `icon-${size}.png`)
     const buffer = await renderIconBuffer(size, size)
-    fs.writeFileSync(targetPath, buffer)
-    console.log(`Generated: ${targetPath}`)
+    writePng(targetPath, buffer)
     buffers.push(buffer)
   }
 
@@ -64,15 +68,24 @@ async function ensureStoreIcons() {
   for (const asset of appxAssets) {
     const targetPath = path.join(appxDir, asset.name)
     const buffer = await renderIconBuffer(asset.width, asset.height)
-    fs.writeFileSync(targetPath, buffer)
-    console.log(`Generated: ${targetPath}`)
+    writePng(targetPath, buffer)
+  }
+
+  // Windows taskbar/search surfaces prefer exact target-size variants and
+  // use altform-unplated assets to avoid the backplate/background.
+  const appListTargetSizes = [16, 20, 24, 30, 32, 36, 40, 44, 48, 60, 64, 72, 80, 96, 256]
+  for (const size of appListTargetSizes) {
+    const baseBuffer = await renderIconBuffer(size, size)
+    const baseName = `Square44x44Logo.targetsize-${size}`
+    writePng(path.join(appxDir, `${baseName}.png`), baseBuffer)
+    writePng(path.join(appxDir, `${baseName}_altform-unplated.png`), baseBuffer)
+    writePng(path.join(appxDir, `${baseName}_altform-lightunplated.png`), baseBuffer)
   }
 
   // Keep StoreLogo transparent to avoid forced background color in Store/taskbar tiles.
   const storeLogoPath = path.join(appxDir, 'StoreLogo.png')
   const storeBuffer = await renderIconBuffer(50, 50)
-  fs.writeFileSync(storeLogoPath, storeBuffer)
-  console.log(`Generated: ${storeLogoPath}`)
+  writePng(storeLogoPath, storeBuffer)
 }
 
 ensureStoreIcons().catch((error) => {
