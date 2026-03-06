@@ -1,8 +1,10 @@
 node_modules
 dist
+dist-electron
 release
 *.log
 .DS_Store
 .env
 .vercel
 .env*.local
+build/appx/Square44x44Logo.targetsize-*.png
