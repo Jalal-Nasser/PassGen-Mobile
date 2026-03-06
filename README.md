@@ -43,3 +43,19 @@ The project heavily utilizes a modern cross-platform mobile web stack:
 - **Free Plan**: Manage up to 4 passwords securely for free.
 - **PRO Plan**: Unlocks unlimited password entries for local storage.
 - **CLOUD Plan**: Unlocks unlimited entries AND seamless cloud synchronization features.
+
+## 📦 Automated GitHub Release
+A convenient npm script makes it easy to publish a release directly from the repository:
+
+```bash
+npm run release
+```
+
+The script requires the [GitHub CLI (`gh`)](https://cli.github.com/) to be installed and authenticated. It will:
+
+1. Read `package.json` for the current version.
+2. Load the corresponding `RELEASE_NOTES_v<version>.md` file.
+3. Invoke `gh release create` to publish the tagged release with the notes.
+
+Ensure your working tree is up to date and you have pushed the tag before running.
+
