@@ -946,6 +946,347 @@ private struct VaultBackupPayload: Codable {
     var entries: [VaultEntry]?
 }
 
+private struct DesktopVaultKdfConfig: Codable {
+    var keyLength: Int
+    var timeCost: Int?
+    var memoryCost: Int?
+    var parallelism: Int?
+    var iterations: Int?
+}
+
+private struct DesktopVaultKdfParams: Codable {
+    var alg: String
+    var params: DesktopVaultKdfConfig
+}
+
+private struct DesktopVaultFileHeader: Codable {
+    var magic: String
+    var version: Int
+    var kdf: DesktopVaultKdfParams
+    var salt: String
+    var nonce: String
+    var cipher: String
+    var tag: String?
+}
+
+private struct DesktopVaultFile: Codable {
+    var header: DesktopVaultFileHeader
+    var ciphertext: String
+}
+
+private struct DesktopVaultEntry: Codable {
+    var id: String
+    var name: String
+    var password: String
+    var username: String?
+    var url: String?
+    var notes: String?
+    var createdAt: String
+    var updatedAt: String
+}
+
+private struct DesktopVaultPayload: Codable {
+    var vaultItems: [DesktopVaultEntry]
+}
+
+private enum DesktopVaultCompatibilityError: LocalizedError {
+    case invalidFile
+    case unsupportedKdf(String)
+    case unsupportedCipher(String)
+    case missingAuthenticationTag
+    case invalidPassword
+    case invalidPayload
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidFile:
+            return "Desktop vault file is invalid or corrupted."
+        case .unsupportedKdf(let algorithm):
+            return "Desktop vault uses unsupported key derivation: \(algorithm). Re-export using PBKDF2/AES on desktop first."
+        case .unsupportedCipher(let cipher):
+            return "Desktop vault uses unsupported encryption: \(cipher). Re-export using PBKDF2/AES on desktop first."
+        case .missingAuthenticationTag:
+            return "Desktop vault is missing its authentication tag."
+        case .invalidPassword:
+            return "Desktop vault password does not match your current mobile vault password."
+        case .invalidPayload:
+            return "Desktop vault payload is invalid."
+        }
+    }
+}
+
+private func portableISO8601String(_ date: Date) -> String {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter.string(from: date)
+}
+
+private func parsePortableISO8601Date(_ rawValue: String) -> Date? {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let parsed = formatter.date(from: rawValue) {
+        return parsed
+    }
+    formatter.formatOptions = [.withInternetDateTime]
+    return formatter.date(from: rawValue)
+}
+
+private enum DesktopVaultCompatibility {
+    private static let magic = "PASSGENVAULT"
+    private static let version = 1
+    private static let defaultIterations = 310_000
+    private static let keyLength = 32
+
+    private static let decoder = JSONDecoder()
+
+    private static let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return encoder
+    }()
+
+    static func isDesktopVaultData(_ data: Data) -> Bool {
+        guard let file = try? decoder.decode(DesktopVaultFile.self, from: data) else {
+            return false
+        }
+        return file.header.magic == magic
+    }
+
+    static func importEntries(from data: Data, password: String) throws -> [VaultEntry] {
+        let payload = try decryptPayload(from: data, password: password)
+        return payload.vaultItems.map { entry in
+            let createdAt = parsePortableISO8601Date(entry.createdAt) ?? Date()
+            let updatedAt = parsePortableISO8601Date(entry.updatedAt) ?? createdAt
+            let url = entry.url ?? ""
+            return VaultEntry(
+                id: entry.id.isEmpty ? UUID().uuidString : entry.id,
+                name: entry.name,
+                username: entry.username ?? "",
+                password: entry.password,
+                url: url,
+                notes: entry.notes ?? "",
+                websitePresetId: nil,
+                websiteDomain: normalizedDomain(from: url),
+                websiteDescription: nil,
+                totpSecret: nil,
+                totpIssuer: nil,
+                totpAccountName: nil,
+                totpDigits: 6,
+                totpPeriod: 30,
+                totpAlgorithm: "SHA1",
+                createdAt: createdAt,
+                updatedAt: updatedAt
+            )
+        }
+    }
+
+    static func exportData(entries: [VaultEntry], password: String, existingRemoteData: Data?) throws -> Data {
+        let nowString = portableISO8601String(Date())
+        let existingFile = try existingRemoteData.map { try parseFile(from: $0) }
+
+        var payloadObject: [String: Any]
+        if let existingRemoteData {
+            let existingPlainData = try decryptPlaintextData(from: existingRemoteData, password: password)
+            let existingJSON = try JSONSerialization.jsonObject(with: existingPlainData, options: [])
+            guard let object = existingJSON as? [String: Any] else {
+                throw DesktopVaultCompatibilityError.invalidPayload
+            }
+            payloadObject = object
+        } else {
+            payloadObject = [
+                "providerConfigs": ["activeProviderId": "google-drive"],
+                "meta": [
+                    "createdAt": nowString,
+                    "updatedAt": nowString,
+                    "vaultVersion": 1
+                ]
+            ]
+        }
+
+        payloadObject["vaultItems"] = entries.map { entry in
+            [
+                "id": entry.id,
+                "name": entry.name,
+                "password": entry.password,
+                "username": entry.username,
+                "url": entry.url,
+                "notes": entry.notes,
+                "createdAt": portableISO8601String(entry.createdAt),
+                "updatedAt": portableISO8601String(entry.updatedAt)
+            ]
+        }
+
+        var meta = (payloadObject["meta"] as? [String: Any]) ?? [:]
+        if meta["createdAt"] == nil {
+            meta["createdAt"] = nowString
+        }
+        meta["updatedAt"] = nowString
+        if meta["vaultVersion"] == nil {
+            meta["vaultVersion"] = 1
+        }
+        payloadObject["meta"] = meta
+
+        let plainData = try JSONSerialization.data(withJSONObject: payloadObject, options: [])
+        let encryptedFile = try encryptPlaintextData(plainData, password: password, existingHeader: existingFile?.header)
+        return try encoder.encode(encryptedFile)
+    }
+
+    static func decryptPlaintextData(from data: Data, password: String) throws -> Data {
+        let file = try parseFile(from: data)
+        return try decryptPlaintextData(from: file, password: password)
+    }
+
+    private static func decryptPayload(from data: Data, password: String) throws -> DesktopVaultPayload {
+        let plainData = try decryptPlaintextData(from: data, password: password)
+        guard let payload = try? decoder.decode(DesktopVaultPayload.self, from: plainData) else {
+            throw DesktopVaultCompatibilityError.invalidPayload
+        }
+        return payload
+    }
+
+    private static func parseFile(from data: Data) throws -> DesktopVaultFile {
+        guard let file = try? decoder.decode(DesktopVaultFile.self, from: data) else {
+            throw DesktopVaultCompatibilityError.invalidFile
+        }
+        guard file.header.magic == magic, file.header.version == version else {
+            throw DesktopVaultCompatibilityError.invalidFile
+        }
+        return file
+    }
+
+    private static func decryptPlaintextData(from file: DesktopVaultFile, password: String) throws -> Data {
+        guard file.header.kdf.alg == "pbkdf2-sha256" else {
+            throw DesktopVaultCompatibilityError.unsupportedKdf(file.header.kdf.alg)
+        }
+        guard file.header.cipher == "aes-256-gcm" else {
+            throw DesktopVaultCompatibilityError.unsupportedCipher(file.header.cipher)
+        }
+        guard let salt = Data(base64Encoded: file.header.salt),
+              let nonceData = Data(base64Encoded: file.header.nonce),
+              let ciphertext = Data(base64Encoded: file.ciphertext) else {
+            throw DesktopVaultCompatibilityError.invalidFile
+        }
+        guard let tagString = file.header.tag,
+              let tag = Data(base64Encoded: tagString) else {
+            throw DesktopVaultCompatibilityError.missingAuthenticationTag
+        }
+
+        let key = try deriveKey(password: password, salt: salt, kdf: file.header.kdf)
+
+        do {
+            let nonce = try AES.GCM.Nonce(data: nonceData)
+            let sealedBox = try AES.GCM.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag)
+            return try AES.GCM.open(sealedBox, using: key)
+        } catch {
+            throw DesktopVaultCompatibilityError.invalidPassword
+        }
+    }
+
+    private static func encryptPlaintextData(_ plainData: Data, password: String, existingHeader: DesktopVaultFileHeader?) throws -> DesktopVaultFile {
+        if let existingHeader {
+            guard existingHeader.kdf.alg == "pbkdf2-sha256" else {
+                throw DesktopVaultCompatibilityError.unsupportedKdf(existingHeader.kdf.alg)
+            }
+            guard existingHeader.cipher == "aes-256-gcm" else {
+                throw DesktopVaultCompatibilityError.unsupportedCipher(existingHeader.cipher)
+            }
+        }
+
+        let salt: Data
+        let kdf: DesktopVaultKdfParams
+        if let existingHeader, let decodedSalt = Data(base64Encoded: existingHeader.salt) {
+            salt = decodedSalt
+            kdf = existingHeader.kdf
+        } else {
+            salt = try randomData(length: 16)
+            kdf = DesktopVaultKdfParams(
+                alg: "pbkdf2-sha256",
+                params: DesktopVaultKdfConfig(
+                    keyLength: keyLength,
+                    timeCost: nil,
+                    memoryCost: nil,
+                    parallelism: nil,
+                    iterations: defaultIterations
+                )
+            )
+        }
+
+        let key = try deriveKey(password: password, salt: salt, kdf: kdf)
+
+        do {
+            let nonce = AES.GCM.Nonce()
+            let sealed = try AES.GCM.seal(plainData, using: key, nonce: nonce)
+            return DesktopVaultFile(
+                header: DesktopVaultFileHeader(
+                    magic: magic,
+                    version: version,
+                    kdf: kdf,
+                    salt: salt.base64EncodedString(),
+                    nonce: Data(nonce).base64EncodedString(),
+                    cipher: "aes-256-gcm",
+                    tag: sealed.tag.base64EncodedString()
+                ),
+                ciphertext: sealed.ciphertext.base64EncodedString()
+            )
+        } catch {
+            throw DesktopVaultCompatibilityError.invalidFile
+        }
+    }
+
+    private static func deriveKey(password: String, salt: Data, kdf: DesktopVaultKdfParams) throws -> SymmetricKey {
+        let passwordData = Data(password.utf8)
+        let derivedLength = max(kdf.params.keyLength, keyLength)
+        var derived = Data(repeating: 0, count: derivedLength)
+        let iterations = kdf.params.iterations ?? defaultIterations
+
+        let status = derived.withUnsafeMutableBytes { derivedBytes in
+            passwordData.withUnsafeBytes { passwordBytes in
+                salt.withUnsafeBytes { saltBytes in
+                    guard let passwordBase = passwordBytes.bindMemory(to: Int8.self).baseAddress,
+                          let saltBase = saltBytes.bindMemory(to: UInt8.self).baseAddress,
+                          let derivedBase = derivedBytes.bindMemory(to: UInt8.self).baseAddress else {
+                        return Int32(kCCParamError)
+                    }
+
+                    return CCKeyDerivationPBKDF(
+                        CCPBKDFAlgorithm(kCCPBKDF2),
+                        passwordBase,
+                        passwordData.count,
+                        saltBase,
+                        salt.count,
+                        CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256),
+                        UInt32(iterations),
+                        derivedBase,
+                        derivedLength
+                    )
+                }
+            }
+        }
+
+        guard status == kCCSuccess else {
+            throw DesktopVaultCompatibilityError.invalidFile
+        }
+
+        return SymmetricKey(data: derived.prefix(kdf.params.keyLength))
+    }
+
+    private static func randomData(length: Int) throws -> Data {
+        var data = Data(repeating: 0, count: length)
+        let result = data.withUnsafeMutableBytes { pointer in
+            guard let baseAddress = pointer.baseAddress else {
+                return Int32(errSecParam)
+            }
+            return SecRandomCopyBytes(kSecRandomDefault, length, baseAddress)
+        }
+
+        guard result == errSecSuccess else {
+            throw DesktopVaultCompatibilityError.invalidFile
+        }
+
+        return data
+    }
+}
+
 private extension UTType {
     static let passgenBackup = UTType(exportedAs: "com.passgen.vault.backup", conformingTo: .json)
 }
@@ -1249,6 +1590,16 @@ private final class NativeVaultStore {
         return importedCount
     }
 
+    func replaceEntries(_ replacementEntries: [VaultEntry]) throws {
+        guard var payload = cachedPayload else {
+            throw VaultStoreError.locked
+        }
+
+        payload.entries = replacementEntries
+        cachedPayload = payload
+        try persist()
+    }
+
     func lock() {
         cachedHeader = nil
         cachedPayload = nil
@@ -1440,6 +1791,7 @@ private final class NativeVaultViewModel: ObservableObject {
     static let privacyURL = "https://mdeploy.dev/privacy"
     static let proStoreProductID = "passgen_pro_monthly"
     static let cloudStoreProductID = "passgen_cloud_monthly"
+    static let googleDriveScope = "https://www.googleapis.com/auth/drive"
 
     @Published var isBooting = true
     @Published var showOnboarding = false
@@ -1674,7 +2026,7 @@ private final class NativeVaultViewModel: ObservableObject {
             selectedTier = .free
         }
         passkeyUnlockEnabled = UserDefaults.standard.bool(forKey: passkeyEnabledStorageKey)
-        authProviderLabel = UserDefaults.standard.string(forKey: authProviderStorageKey) ?? "Not Connected"
+        authProviderLabel = normalizedAuthProviderLabel(UserDefaults.standard.string(forKey: authProviderStorageKey))
         authEmail = UserDefaults.standard.string(forKey: authEmailStorageKey) ?? ""
         developerAPIKey = NativeDeveloperAPIKeyKeychain.read() ?? ""
         if let providerRaw = UserDefaults.standard.string(forKey: cloudProviderStorageKey),
@@ -1696,7 +2048,7 @@ private final class NativeVaultViewModel: ObservableObject {
         if let session = session {
             authEmail = session.email ?? authEmail
             if authProviderLabel == "Not Connected" {
-                authProviderLabel = "Supabase"
+                authProviderLabel = "Connected"
             }
         }
         generatedPassword = generatePassword()
@@ -1709,6 +2061,15 @@ private final class NativeVaultViewModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
             self?.isBooting = false
         }
+    }
+
+    private func normalizedAuthProviderLabel(_ rawValue: String?) -> String {
+        let trimmed = (rawValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "Not Connected" }
+        if trimmed.caseInsensitiveCompare("supabase") == .orderedSame {
+            return "Connected"
+        }
+        return trimmed
     }
 
     func nextOnboardingStep() {
@@ -1867,8 +2228,9 @@ private final class NativeVaultViewModel: ObservableObject {
             clientID: runtimeConfig.googleIOSClientID,
             serverClientID: runtimeConfig.googleServerClientID
         )
+        let additionalScopes = [Self.googleDriveScope]
 
-        GIDSignIn.sharedInstance.signIn(with: configuration, presenting: presenter) { [weak self] user, error in
+        GIDSignIn.sharedInstance.signIn(with: configuration, presenting: presenter, hint: nil, additionalScopes: additionalScopes) { [weak self] user, error in
             guard let self = self else { return }
             if let error {
                 DispatchQueue.main.async {
@@ -2134,6 +2496,11 @@ private final class NativeVaultViewModel: ObservableObject {
             return
         }
 
+        if DesktopVaultCompatibility.isDesktopVaultData(data) {
+            importDesktopVaultData(data, successMessage: "Imported desktop vault from backup.")
+            return
+        }
+
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
@@ -2155,6 +2522,46 @@ private final class NativeVaultViewModel: ObservableObject {
         }
 
         alertState = AlertState(message: "Unsupported backup format.")
+    }
+
+    private func importDesktopVaultData(_ data: Data, successMessage: String) {
+        guard isUnlocked else {
+            alertState = AlertState(message: "Unlock your vault before importing desktop backups.")
+            return
+        }
+
+        do {
+            try replaceEntriesFromDesktopVaultData(data)
+            alertState = AlertState(message: successMessage)
+            triggerAutoSync(reason: "desktop-import")
+        } catch {
+            alertState = AlertState(message: (error as? LocalizedError)?.errorDescription ?? "Unable to import desktop vault.")
+        }
+    }
+
+    private func currentDesktopSyncPassword() -> String {
+        let candidate = lastSuccessfulPassword.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !candidate.isEmpty {
+            return candidate
+        }
+        return masterPassword.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func replaceEntriesFromDesktopVaultData(_ data: Data) throws {
+        let syncPassword = currentDesktopSyncPassword()
+        guard !syncPassword.isEmpty else {
+            throw SupabaseAuthError.requestFailed("Unlock the vault with your master password before importing desktop backups.")
+        }
+
+        let importedEntries = try DesktopVaultCompatibility.importEntries(from: data, password: syncPassword)
+        try createLocalRecoverySnapshot()
+        try store.replaceEntries(importedEntries)
+        refreshEntries()
+    }
+
+    private func desktopGoogleDriveFileName() -> String {
+        let stamp = portableISO8601String(Date()).replacingOccurrences(of: ":", with: "-").replacingOccurrences(of: ".", with: "-")
+        return "passgen-vault-\(stamp).pgvault"
     }
 
     func handleAppWillEnterForeground() {
@@ -2409,7 +2816,7 @@ private final class NativeVaultViewModel: ObservableObject {
     private func applySession(_ nextSession: SupabaseSession, providerLabel: String, fallbackEmail: String?) {
         session = nextSession
         NativeSessionKeychain.save(nextSession)
-        authProviderLabel = providerLabel
+        authProviderLabel = normalizedAuthProviderLabel(providerLabel)
         authEmail = nextSession.email ?? fallbackEmail ?? authEmail
         UserDefaults.standard.set(authProviderLabel, forKey: authProviderStorageKey)
         UserDefaults.standard.set(authEmail, forKey: authEmailStorageKey)
@@ -2692,27 +3099,50 @@ private final class NativeVaultViewModel: ObservableObject {
             })
         }
 
-        let fileName = "\(runtimeConfig?.driveAppFolder ?? "PassGenVault")-vault.pgvault"
-        let localData = try store.exportEncryptedBlob()
         let localModified = store.vaultModifiedAt() ?? .distantPast
+        let syncPassword = currentDesktopSyncPassword()
+        let preferredRemote = try await fetchPreferredGoogleDriveRemote(accessToken: token)
 
-        let metadata = try await fetchGoogleDriveMetadata(fileName: fileName, accessToken: token)
-        if let metadata,
-           let remoteModified = metadata.modifiedTime,
-           remoteModified > localModified {
-            try createLocalRecoverySnapshot()
-            let remoteData = try await downloadGoogleDriveFile(fileID: metadata.id, accessToken: token)
-            try store.importEncryptedBlob(remoteData)
-            if !lastSuccessfulPassword.isEmpty {
-                try store.unlock(password: lastSuccessfulPassword)
-                refreshEntries()
+        switch preferredRemote?.location {
+        case .desktopDrive:
+            guard let preferredRemote else { return }
+            let remoteData = try await downloadGoogleDriveFile(fileID: preferredRemote.metadata.id, accessToken: token)
+            let remoteModified = preferredRemote.metadata.modifiedTime ?? .distantPast
+            if remoteModified > localModified {
+                try replaceEntriesFromDesktopVaultData(remoteData)
             } else {
-                lockVault()
+                guard !syncPassword.isEmpty else {
+                    throw SupabaseAuthError.requestFailed("Unlock the vault with your master password before syncing to desktop Google Drive.")
+                }
+                let desktopData = try DesktopVaultCompatibility.exportData(entries: entries, password: syncPassword, existingRemoteData: remoteData)
+                try await updateGoogleDriveFile(fileID: preferredRemote.metadata.id, payload: desktopData, accessToken: token)
             }
-        } else if let metadata {
-            try await updateGoogleDriveFile(fileID: metadata.id, payload: localData, accessToken: token)
-        } else {
-            try await createGoogleDriveFile(fileName: fileName, payload: localData, accessToken: token)
+        case .appDataFolder:
+            guard let preferredRemote else { return }
+            let remoteModified = preferredRemote.metadata.modifiedTime ?? .distantPast
+            if remoteModified > localModified {
+                try createLocalRecoverySnapshot()
+                let remoteData = try await downloadGoogleDriveFile(fileID: preferredRemote.metadata.id, accessToken: token)
+                try store.importEncryptedBlob(remoteData)
+                if !lastSuccessfulPassword.isEmpty {
+                    try store.unlock(password: lastSuccessfulPassword)
+                    refreshEntries()
+                } else {
+                    lockVault()
+                }
+            } else {
+                guard !syncPassword.isEmpty else {
+                    throw SupabaseAuthError.requestFailed("Unlock the vault with your master password before syncing to Google Drive.")
+                }
+                let desktopData = try DesktopVaultCompatibility.exportData(entries: entries, password: syncPassword, existingRemoteData: nil)
+                try await createGoogleDriveDesktopFile(fileName: desktopGoogleDriveFileName(), payload: desktopData, accessToken: token)
+            }
+        case .none:
+            guard !syncPassword.isEmpty else {
+                throw SupabaseAuthError.requestFailed("Unlock the vault with your master password before syncing to Google Drive.")
+            }
+            let desktopData = try DesktopVaultCompatibility.exportData(entries: entries, password: syncPassword, existingRemoteData: nil)
+            try await createGoogleDriveDesktopFile(fileName: desktopGoogleDriveFileName(), payload: desktopData, accessToken: token)
         }
 #else
         throw SupabaseAuthError.requestFailed("Google Drive sync is unavailable in this build.")
@@ -2889,7 +3319,56 @@ private final class NativeVaultViewModel: ObservableObject {
         let files: [GoogleDriveMetadata]
     }
 
-    private func fetchGoogleDriveMetadata(fileName: String, accessToken: String) async throws -> GoogleDriveMetadata? {
+    private enum GoogleDriveRemoteLocation {
+        case appDataFolder
+        case desktopDrive
+    }
+
+    private struct GoogleDriveRemoteFile {
+        let metadata: GoogleDriveMetadata
+        let location: GoogleDriveRemoteLocation
+    }
+
+    private func fetchPreferredGoogleDriveRemote(accessToken: String) async throws -> GoogleDriveRemoteFile? {
+        if let desktopMetadata = try await fetchGoogleDriveDesktopMetadata(accessToken: accessToken) {
+            return GoogleDriveRemoteFile(metadata: desktopMetadata, location: .desktopDrive)
+        }
+
+        let nativeFileName = "\(runtimeConfig?.driveAppFolder ?? "PassGenVault")-vault.pgvault"
+        if let nativeMetadata = try await fetchGoogleDriveAppDataMetadata(fileName: nativeFileName, accessToken: accessToken) {
+            return GoogleDriveRemoteFile(metadata: nativeMetadata, location: .appDataFolder)
+        }
+
+        return nil
+    }
+
+    private func fetchGoogleDriveDesktopMetadata(accessToken: String) async throws -> GoogleDriveMetadata? {
+        var components = URLComponents(string: "https://www.googleapis.com/drive/v3/files")!
+        components.queryItems = [
+            URLQueryItem(name: "spaces", value: "drive"),
+            URLQueryItem(name: "q", value: "name contains 'passgen-vault-' and trashed=false"),
+            URLQueryItem(name: "fields", value: "files(id,name,modifiedTime)"),
+            URLQueryItem(name: "orderBy", value: "modifiedTime desc"),
+            URLQueryItem(name: "pageSize", value: "10")
+        ]
+
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw SupabaseAuthError.requestFailed("Google Drive desktop vault lookup failed.")
+        }
+
+        let decoded = try JSONDecoder().decode(GoogleDriveListResponse.self, from: data)
+        return decoded.files.first { file in
+            let lowered = file.name.lowercased()
+            return lowered.hasPrefix("passgen-vault-") && lowered.hasSuffix(".pgvault")
+        }
+    }
+
+    private func fetchGoogleDriveAppDataMetadata(fileName: String, accessToken: String) async throws -> GoogleDriveMetadata? {
         var components = URLComponents(string: "https://www.googleapis.com/drive/v3/files")!
         components.queryItems = [
             URLQueryItem(name: "spaces", value: "appDataFolder"),
@@ -2971,6 +3450,43 @@ private final class NativeVaultViewModel: ObservableObject {
         let (_, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             throw SupabaseAuthError.requestFailed("Google Drive create file failed.")
+        }
+    }
+
+    private func createGoogleDriveDesktopFile(fileName: String, payload: Data, accessToken: String) async throws {
+        guard let url = URL(string: "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart") else {
+            throw SupabaseAuthError.requestFailed("Invalid Google Drive create URL.")
+        }
+
+        let boundary = "PassGenDesktopBoundary-\(UUID().uuidString)"
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/related; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        let metadata: [String: Any] = [
+            "name": fileName,
+            "appProperties": [
+                "passgenVault": "1",
+                "createdAt": portableISO8601String(Date())
+            ]
+        ]
+        let metadataData = try JSONSerialization.data(withJSONObject: metadata, options: [])
+
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Type: application/json; charset=UTF-8\r\n\r\n".data(using: .utf8)!)
+        body.append(metadataData)
+        body.append("\r\n--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
+        body.append(payload)
+        body.append("\r\n--\(boundary)--".data(using: .utf8)!)
+
+        request.httpBody = body
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw SupabaseAuthError.requestFailed("Google Drive desktop file create failed.")
         }
     }
 
@@ -3726,6 +4242,7 @@ private struct NativeLegalFooterView: View {
 private struct NativeUnlockView: View {
     @ObservedObject var viewModel: NativeVaultViewModel
     @State private var showSavedHint = false
+    @State private var hintDismissWorkItem: DispatchWorkItem?
 
     var body: some View {
         VStack(spacing: 18) {
@@ -3740,9 +4257,28 @@ private struct NativeUnlockView: View {
 
             VStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Master Password")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(Color.white.opacity(0.92))
+                    HStack(spacing: 8) {
+                        Text("Master Password")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(Color.white.opacity(0.92))
+
+                        Spacer()
+
+                        if viewModel.hasVault && !viewModel.passwordHint.isEmpty {
+                            Button {
+                                presentSavedHint()
+                            } label: {
+                                Image(systemName: "lightbulb")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(Color.white.opacity(0.95))
+                                    .frame(width: 28, height: 28)
+                                    .background(Color.white.opacity(0.18))
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Show password hint")
+                        }
+                    }
 
                     HStack(spacing: 8) {
                         Group {
@@ -3764,6 +4300,18 @@ private struct NativeUnlockView: View {
                     .padding(12)
                     .background(Color.white)
                     .cornerRadius(12)
+
+                    if showSavedHint {
+                        Text(viewModel.passwordHint)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(Color(red: 42 / 255, green: 49 / 255, blue: 92 / 255))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(Color.white.opacity(0.95))
+                            .cornerRadius(10)
+                            .frame(maxWidth: 220, alignment: .leading)
+                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    }
                 }
 
                 if !viewModel.hasVault {
@@ -3778,35 +4326,6 @@ private struct NativeUnlockView: View {
                             .padding(12)
                             .background(Color.white)
                             .cornerRadius(12)
-                    }
-                } else if !viewModel.passwordHint.isEmpty {
-                    VStack(spacing: 8) {
-                        HStack {
-                            Spacer()
-                            Button {
-                                showSavedHint.toggle()
-                            } label: {
-                                Image(systemName: showSavedHint ? "lightbulb.fill" : "lightbulb")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundColor(Color(red: 42 / 255, green: 49 / 255, blue: 92 / 255))
-                                    .frame(width: 40, height: 40)
-                                    .background(Color.white.opacity(0.95))
-                                    .clipShape(Circle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Show password hint")
-                            Spacer()
-                        }
-
-                        if showSavedHint {
-                            Text(viewModel.passwordHint)
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(Color(red: 42 / 255, green: 49 / 255, blue: 92 / 255))
-                                .padding(10)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Color.white.opacity(0.92))
-                                .cornerRadius(12)
-                        }
                     }
                 }
 
@@ -3889,6 +4408,26 @@ private struct NativeUnlockView: View {
         }
         .padding(.top, 24)
         .padding(.horizontal, 10)
+        .onDisappear {
+            hintDismissWorkItem?.cancel()
+        }
+    }
+
+    private func presentSavedHint() {
+        guard !viewModel.passwordHint.isEmpty else { return }
+
+        hintDismissWorkItem?.cancel()
+        withAnimation(.easeInOut(duration: 0.18)) {
+            showSavedHint = true
+        }
+
+        let workItem = DispatchWorkItem {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                showSavedHint = false
+            }
+        }
+        hintDismissWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2, execute: workItem)
     }
 }
 
