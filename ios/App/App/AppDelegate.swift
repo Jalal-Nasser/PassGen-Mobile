@@ -315,7 +315,7 @@ private enum NativeNotificationManager {
     }
 
     static func notificationStatus() async -> UNAuthorizationStatus {
-        await withCheckedContinuation { continuation in
+        await withCheckedContinuation { (continuation: CheckedContinuation<UNAuthorizationStatus, Never>) in
             UNUserNotificationCenter.current().getNotificationSettings { settings in
                 continuation.resume(returning: settings.authorizationStatus)
             }
@@ -323,7 +323,7 @@ private enum NativeNotificationManager {
     }
 
     static func requestAuthorization() async throws -> Bool {
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
                 if let error {
                     continuation.resume(throwing: error)
@@ -366,7 +366,7 @@ private enum NativeNotificationManager {
     }
 
     private static func add(_ request: UNNotificationRequest) async throws {
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             UNUserNotificationCenter.current().add(request) { error in
                 if let error {
                     continuation.resume(throwing: error)
@@ -3085,7 +3085,7 @@ private final class NativeVaultViewModel: ObservableObject {
             return "Denied in iOS Settings"
         case .notDetermined:
             return "Not requested"
-        @unknown default:
+        default:
             if #available(iOS 14.0, *), status == .ephemeral {
                 return "Temporarily allowed"
             }
