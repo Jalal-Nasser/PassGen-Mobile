@@ -1833,6 +1833,8 @@ private final class NativeVaultViewModel: ObservableObject {
     @Published var purchaseDiagnosticsBusy = false
     @Published var purchaseReadinessStatus = "Not checked yet."
     @Published var purchaseReadinessLooksGood = false
+    @Published var planSheetPreferredTier: PremiumTier?
+    @Published var planSheetMessage: String?
 
     @Published var generatedPassword = ""
     @Published var length = 18
@@ -2090,10 +2092,24 @@ private final class NativeVaultViewModel: ObservableObject {
         if tier == .free {
             selectedTier = .free
             UserDefaults.standard.set(PremiumTier.free.rawValue, forKey: planStorageKey)
+            planSheetMessage = nil
             return
         }
 
         purchaseTier(tier)
+    }
+
+    func presentPlanSheet(focusingOn tier: PremiumTier? = nil, message: String? = nil) {
+        planSheetPreferredTier = tier
+        if let message, !message.isEmpty {
+            planSheetMessage = message
+        }
+        showPlanSheet = true
+    }
+
+    func clearPlanSheetContext() {
+        planSheetPreferredTier = nil
+        planSheetMessage = nil
     }
 
     func unlockVault() {
@@ -2325,7 +2341,7 @@ private final class NativeVaultViewModel: ObservableObject {
     func generateDeveloperAPIKey() {
         guard isPaidTier else {
             alertState = AlertState(message: "Developer API keys are available for PRO and CLOUD plans.")
-            showPlanSheet = true
+            presentPlanSheet(focusingOn: .pro, message: "Developer API keys require a paid plan. PRO or CLOUD will unlock this feature.")
             return
         }
         guard let authClient = authClient else {
@@ -2400,7 +2416,7 @@ private final class NativeVaultViewModel: ObservableObject {
 
         guard isPaidTier else {
             alertState = AlertState(message: "Password export is available for paid users (PRO/CLOUD).")
-            showPlanSheet = true
+            presentPlanSheet(focusingOn: .pro, message: "Encrypted backup export requires a paid plan. PRO or CLOUD will unlock this feature.")
             return nil
         }
 
@@ -2428,7 +2444,7 @@ private final class NativeVaultViewModel: ObservableObject {
 
         guard hasCloudTools else {
             alertState = AlertState(message: "Import from iCloud/Google Drive is available on the CLOUD monthly plan.")
-            showPlanSheet = true
+            presentPlanSheet(focusingOn: .cloud, message: "Google Drive and iCloud import require the CLOUD monthly plan.")
             return
         }
 
@@ -2769,12 +2785,15 @@ private final class NativeVaultViewModel: ObservableObject {
     private func purchaseTier(_ tier: PremiumTier) {
 #if canImport(RevenueCat)
         guard runtimeConfig != nil else {
-            alertState = AlertState(message: "RevenueCat runtime config is missing.")
+            let message = "RevenueCat runtime config is missing."
+            planSheetMessage = message
+            alertState = AlertState(message: message)
             return
         }
         guard tier != .free else {
             selectedTier = .free
             UserDefaults.standard.set(PremiumTier.free.rawValue, forKey: planStorageKey)
+            planSheetMessage = nil
             return
         }
         planBusy = true
@@ -2788,14 +2807,40 @@ private final class NativeVaultViewModel: ObservableObject {
                 }
                 let customerInfo = try await purchaseRevenueCatPackage(package)
                 applyTierFromCustomerInfo(customerInfo)
+                planSheetMessage = nil
+                showPlanSheet = false
                 alertState = AlertState(message: "\(tier.title) plan activated.")
             } catch {
-                alertState = AlertState(message: "Purchase failed: \(error.localizedDescription)")
+                let message = purchaseFailureMessage(for: tier, error: error)
+                planSheetMessage = message
+                alertState = AlertState(message: message)
             }
         }
 #else
-        alertState = AlertState(message: "In-app purchases are unavailable in this build.")
+        let message = "In-app purchases are unavailable in this build."
+        planSheetMessage = message
+        alertState = AlertState(message: message)
 #endif
+    }
+
+    private func purchaseFailureMessage(for tier: PremiumTier, error: Error) -> String {
+        let message = error.localizedDescription
+        let normalized = message.lowercased()
+
+        if normalized.contains("cancelled") {
+            return "Purchase was cancelled."
+        }
+
+        if normalized.contains("could not be fetched")
+            || normalized.contains("no \(tier.title.lowercased()) package")
+            || normalized.contains("offering")
+            || normalized.contains("configuration")
+            || normalized.contains("product")
+        {
+            return "\(tier.title) purchase is not ready yet. Check RevenueCat offerings and App Store product setup, then retry."
+        }
+
+        return "Purchase failed: \(message)"
     }
 
     private func refreshTierFromRevenueCat() {
@@ -3235,7 +3280,7 @@ private final class NativeVaultViewModel: ObservableObject {
             let allowed = max(0, freePlanLimit - entries.count)
             if allowed <= 0 {
                 alertState = AlertState(message: "Free plan is full. Upgrade to import CSV data.")
-                showPlanSheet = true
+                presentPlanSheet(focusingOn: .pro, message: "CSV import beyond 4 entries requires PRO or CLOUD.")
                 return
             }
             imported = Array(imported.prefix(allowed))
@@ -3721,7 +3766,7 @@ private final class NativeVaultViewModel: ObservableObject {
     func startCreateEntry(seedPassword: String? = nil) {
         if selectedTier == .free && entries.count >= freePlanLimit {
             alertState = AlertState(message: "Free plan allows up to 4 passwords. Upgrade to PRO for unlimited entries.")
-            showPlanSheet = true
+            presentPlanSheet(focusingOn: .pro, message: "Unlimited vault entries require PRO or CLOUD.")
             return
         }
         draft = .empty
@@ -3755,7 +3800,7 @@ private final class NativeVaultViewModel: ObservableObject {
 
         if draft.id == nil, selectedTier == .free, entries.count >= freePlanLimit {
             alertState = AlertState(message: "Free plan allows up to 4 passwords. Upgrade to PRO for unlimited entries.")
-            showPlanSheet = true
+            presentPlanSheet(focusingOn: .pro, message: "Unlimited vault entries require PRO or CLOUD.")
             return false
         }
 
@@ -4003,7 +4048,9 @@ private struct NativeVaultRootView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
-        .sheet(isPresented: $viewModel.showPlanSheet) {
+        .sheet(isPresented: $viewModel.showPlanSheet, onDismiss: {
+            viewModel.clearPlanSheetContext()
+        }) {
             NativePlansView(viewModel: viewModel)
         }
     }
@@ -4100,10 +4147,24 @@ private struct NativePlansView: View {
     @ObservedObject var viewModel: NativeVaultViewModel
     @Environment(\.dismiss) private var dismiss
 
+    private var displayedTiers: [PremiumTier] {
+        guard let preferred = viewModel.planSheetPreferredTier else {
+            return PremiumTier.allCases
+        }
+        return [preferred] + PremiumTier.allCases.filter { $0 != preferred }
+    }
+
     var body: some View {
         NavigationView {
             List {
-                ForEach(PremiumTier.allCases, id: \.self) { tier in
+                if let message = viewModel.planSheetMessage {
+                    Text(message)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.red)
+                        .padding(.vertical, 6)
+                }
+
+                ForEach(displayedTiers, id: \.self) { tier in
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             Text(tier.title)
@@ -4481,7 +4542,7 @@ private struct NativeVaultTabView: View {
                         }
                         Spacer()
                         Button("Upgrade") {
-                            viewModel.showPlanSheet = true
+                            viewModel.presentPlanSheet(focusingOn: .pro, message: "Unlimited vault entries require PRO or CLOUD.")
                         }
                         .font(.system(size: 13, weight: .bold))
                     }
@@ -4670,7 +4731,7 @@ private struct NativeSettingsTabView: View {
                     }
 
                     Button("Manage Plans") {
-                        viewModel.showPlanSheet = true
+                        viewModel.presentPlanSheet()
                     }
 
                     Text(viewModel.purchaseReadinessStatus)
@@ -4805,8 +4866,8 @@ private struct NativeSettingsTabView: View {
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(.secondary)
 
-                        Button("Upgrade to PRO") {
-                            viewModel.showPlanSheet = true
+                        Button("Upgrade to PRO or CLOUD") {
+                            viewModel.presentPlanSheet(focusingOn: .pro, message: "Developer API keys require a paid plan. PRO or CLOUD will unlock this feature.")
                         }
                     }
                 }
@@ -4854,7 +4915,7 @@ private struct NativeSettingsTabView: View {
                             showImportPicker = true
                         } else {
                             viewModel.alertState = AlertState(message: "Upgrade to CLOUD to import backups from iCloud/Google Drive.")
-                            viewModel.showPlanSheet = true
+                            viewModel.presentPlanSheet(focusingOn: .cloud, message: "Google Drive and iCloud import require the CLOUD monthly plan.")
                         }
                     }
 
