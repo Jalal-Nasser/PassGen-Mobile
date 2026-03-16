@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 import LocalAuthentication
 import AuthenticationServices
 import AVFoundation
+import UserNotifications
 
 #if canImport(GoogleSignIn)
 import GoogleSignIn
@@ -303,6 +304,80 @@ private enum NativeDeveloperAPIKeyKeychain {
     }
 }
 
+private enum NativeNotificationManager {
+    static let dailyReminderIdentifier = "com.passgen.native.daily-security-reminder"
+    static let testNotificationIdentifier = "com.passgen.native.test-notification"
+
+    static func defaultReminderDate(hour: Int = 20, minute: Int = 0) -> Date {
+        let calendar = Calendar.current
+        let now = Date()
+        return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: now) ?? now
+    }
+
+    static func notificationStatus() async -> UNAuthorizationStatus {
+        await withCheckedContinuation { continuation in
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
+                continuation.resume(returning: settings.authorizationStatus)
+            }
+        }
+    }
+
+    static func requestAuthorization() async throws -> Bool {
+        try await withCheckedThrowingContinuation { continuation in
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: granted)
+                }
+            }
+        }
+    }
+
+    static func scheduleTestNotification(after seconds: TimeInterval = 5) async throws {
+        let content = UNMutableNotificationContent()
+        content.title = "PassGen notification test"
+        content.body = "Notifications are working on this iPhone."
+        content.sound = .default
+
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(5, seconds), repeats: false)
+        let request = UNNotificationRequest(identifier: testNotificationIdentifier, content: content, trigger: trigger)
+        try await add(request)
+    }
+
+    static func syncDailyReminder(hour: Int, minute: Int, enabled: Bool) async throws {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [dailyReminderIdentifier])
+
+        guard enabled else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "PassGen reminder"
+        content.body = "Review your vault, verify backups, and keep your security settings current."
+        content.sound = .default
+
+        var components = DateComponents()
+        components.hour = hour
+        components.minute = minute
+
+        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
+        let request = UNNotificationRequest(identifier: dailyReminderIdentifier, content: content, trigger: trigger)
+        try await add(request)
+    }
+
+    private static func add(_ request: UNNotificationRequest) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            UNUserNotificationCenter.current().add(request) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: ())
+                }
+            }
+        }
+    }
+}
+
 private final class SupabaseAuthClient {
     private let config: MobileRuntimeConfig
 
@@ -466,7 +541,7 @@ private func topMostViewController() -> UIViewController? {
 }
 
 @UIApplicationMain
-class AppDelegate: UIResponder, UIApplicationDelegate {
+class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     var window: UIWindow?
     private let runtimeConfigResult: Result<MobileRuntimeConfig, Error>
     private let viewModel: NativeVaultViewModel
@@ -494,6 +569,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             name: UIApplication.willEnterForegroundNotification,
             object: nil
         )
+        UNUserNotificationCenter.current().delegate = self
 
 #if canImport(GoogleSignIn)
         // Configuration is now passed directly during signIn in SDK v7+
@@ -527,6 +603,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
 #endif
         return false
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        if #available(iOS 14.0, *) {
+            completionHandler([.banner, .sound, .badge])
+        } else {
+            completionHandler([.alert, .sound, .badge])
+        }
     }
 }
 
@@ -1316,6 +1404,8 @@ private final class NativeVaultViewModel: ObservableObject {
     static let developerURL = "https://github.com/Jalal-Nasser/"
     static let termsURL = "https://mdeploy.dev/terms"
     static let privacyURL = "https://mdeploy.dev/privacy"
+    static let proStoreProductID = "passgen_pro_monthly"
+    static let cloudStoreProductID = "passgen_cloud_monthly"
 
     @Published var isBooting = true
     @Published var showOnboarding = false
@@ -1349,6 +1439,14 @@ private final class NativeVaultViewModel: ObservableObject {
     @Published var developerAPIKey = ""
     @Published var apiKeySummaries: [MobileAPIKeySummary] = []
     @Published var selectedDeveloperTarget = "Vercel v0"
+    @Published var notificationsAuthorized = false
+    @Published var notificationStatusText = "Not requested"
+    @Published var notificationReminderEnabled = false
+    @Published var notificationReminderTime = NativeNotificationManager.defaultReminderDate()
+    @Published var notificationsBusy = false
+    @Published var purchaseDiagnosticsBusy = false
+    @Published var purchaseReadinessStatus = "Not checked yet."
+    @Published var purchaseReadinessLooksGood = false
 
     @Published var generatedPassword = ""
     @Published var length = 18
@@ -1365,6 +1463,9 @@ private final class NativeVaultViewModel: ObservableObject {
     private let authEmailStorageKey = "passgen-auth-email-native"
     private let cloudProviderStorageKey = "passgen-cloud-provider-native"
     private let cloudSyncAtStorageKey = "passgen-cloud-sync-at-native"
+    private let notificationReminderEnabledStorageKey = "passgen-notification-reminder-enabled-native"
+    private let notificationReminderHourStorageKey = "passgen-notification-reminder-hour-native"
+    private let notificationReminderMinuteStorageKey = "passgen-notification-reminder-minute-native"
     private let store = NativeVaultStore()
     private let runtimeConfig: MobileRuntimeConfig?
     private let authClient: SupabaseAuthClient?
@@ -1548,6 +1649,12 @@ private final class NativeVaultViewModel: ObservableObject {
         if let date = UserDefaults.standard.object(forKey: cloudSyncAtStorageKey) as? Date {
             lastCloudSyncAt = date
         }
+        notificationReminderEnabled = UserDefaults.standard.bool(forKey: notificationReminderEnabledStorageKey)
+        let reminderHourObject = UserDefaults.standard.object(forKey: notificationReminderHourStorageKey)
+        let reminderMinuteObject = UserDefaults.standard.object(forKey: notificationReminderMinuteStorageKey)
+        let reminderHour = reminderHourObject as? Int ?? 20
+        let reminderMinute = reminderMinuteObject as? Int ?? 0
+        notificationReminderTime = NativeNotificationManager.defaultReminderDate(hour: reminderHour, minute: reminderMinute)
         session = NativeSessionKeychain.read()
         if let session = session {
             authEmail = session.email ?? authEmail
@@ -1559,6 +1666,8 @@ private final class NativeVaultViewModel: ObservableObject {
 
         refreshSupabaseSessionIfNeeded()
         refreshTierFromRevenueCat()
+        refreshNotificationStatus()
+        refreshPurchaseReadiness()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
             self?.isBooting = false
@@ -2014,6 +2123,7 @@ private final class NativeVaultViewModel: ObservableObject {
     func handleAppWillEnterForeground() {
         refreshSupabaseSessionIfNeeded()
         refreshTierFromRevenueCat()
+        refreshNotificationStatus()
         if isUnlocked {
             triggerAutoSync(reason: "foreground")
         }
@@ -2033,6 +2143,160 @@ private final class NativeVaultViewModel: ObservableObject {
 
     func syncCloudNow() {
         triggerAutoSync(reason: "manual")
+    }
+
+    func requestNotificationAccess() {
+        notificationsBusy = true
+        Task {
+            defer { notificationsBusy = false }
+            do {
+                let granted = try await NativeNotificationManager.requestAuthorization()
+                refreshNotificationStatus()
+                if granted {
+                    if notificationReminderEnabled {
+                        try await syncNotificationReminder()
+                    }
+                    alertState = AlertState(message: "Notifications enabled.")
+                } else {
+                    alertState = AlertState(message: "Notifications were not enabled. You can allow them later from iOS Settings.")
+                }
+            } catch {
+                alertState = AlertState(message: "Unable to request notification access: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func setNotificationReminderEnabled(_ enabled: Bool) {
+        notificationReminderEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: notificationReminderEnabledStorageKey)
+        notificationsBusy = true
+
+        Task {
+            defer { notificationsBusy = false }
+
+            if enabled {
+                do {
+                    guard try await ensureNotificationAuthorization() else {
+                        notificationReminderEnabled = false
+                        UserDefaults.standard.set(false, forKey: notificationReminderEnabledStorageKey)
+                        return
+                    }
+
+                    try await syncNotificationReminder()
+                    alertState = AlertState(message: "Daily reminder enabled.")
+                } catch {
+                    notificationReminderEnabled = false
+                    UserDefaults.standard.set(false, forKey: notificationReminderEnabledStorageKey)
+                    alertState = AlertState(message: "Unable to enable reminder notifications: \(error.localizedDescription)")
+                }
+            } else {
+                do {
+                    try await NativeNotificationManager.syncDailyReminder(hour: 0, minute: 0, enabled: false)
+                    alertState = AlertState(message: "Daily reminder disabled.")
+                } catch {
+                    alertState = AlertState(message: "Unable to disable reminder notifications: \(error.localizedDescription)")
+                }
+            }
+
+            refreshNotificationStatus()
+        }
+    }
+
+    func updateNotificationReminderTime(_ date: Date) {
+        notificationReminderTime = date
+
+        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+        UserDefaults.standard.set(components.hour ?? 20, forKey: notificationReminderHourStorageKey)
+        UserDefaults.standard.set(components.minute ?? 0, forKey: notificationReminderMinuteStorageKey)
+
+        guard notificationReminderEnabled else { return }
+
+        notificationsBusy = true
+        Task {
+            defer { notificationsBusy = false }
+            do {
+                try await syncNotificationReminder()
+                alertState = AlertState(message: "Reminder time updated.")
+            } catch {
+                alertState = AlertState(message: "Unable to update reminder time: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func sendTestNotification() {
+        notificationsBusy = true
+        Task {
+            defer { notificationsBusy = false }
+            do {
+                guard try await ensureNotificationAuthorization() else {
+                    return
+                }
+
+                try await NativeNotificationManager.scheduleTestNotification()
+                alertState = AlertState(message: "Test notification scheduled for 5 seconds from now.")
+            } catch {
+                alertState = AlertState(message: "Unable to schedule test notification: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func refreshNotificationStatus() {
+        Task {
+            let status = await NativeNotificationManager.notificationStatus()
+            notificationsAuthorized = isNotificationAuthorized(status)
+            notificationStatusText = notificationStatusSummary(for: status)
+            if notificationsAuthorized && notificationReminderEnabled {
+                try? await syncNotificationReminder()
+            }
+        }
+    }
+
+    func refreshPurchaseReadiness() {
+#if canImport(RevenueCat)
+        guard runtimeConfig != nil else {
+            purchaseReadinessLooksGood = false
+            purchaseReadinessStatus = "RevenueCat runtime config is missing."
+            return
+        }
+
+        guard !purchaseDiagnosticsBusy else { return }
+
+        purchaseDiagnosticsBusy = true
+        purchaseReadinessLooksGood = false
+        purchaseReadinessStatus = "Checking App Store subscriptions..."
+
+        Task {
+            defer { purchaseDiagnosticsBusy = false }
+            do {
+                try await configureRevenueCat()
+                let offerings = try await fetchRevenueCatOfferings()
+                guard let current = offerings.current else {
+                    purchaseReadinessStatus = "RevenueCat current offering is missing."
+                    return
+                }
+
+                let availableIDs = current.availablePackages.map { $0.storeProduct.productIdentifier.lowercased() }
+                let hasPro = availableIDs.contains(Self.proStoreProductID.lowercased())
+                let hasCloud = availableIDs.contains(Self.cloudStoreProductID.lowercased())
+
+                purchaseReadinessLooksGood = hasPro && hasCloud
+                if purchaseReadinessLooksGood {
+                    purchaseReadinessStatus = "Ready: RevenueCat offering '\(current.identifier)' includes PRO and CLOUD App Store subscriptions."
+                } else {
+                    var missing: [String] = []
+                    if !hasPro { missing.append(Self.proStoreProductID) }
+                    if !hasCloud { missing.append(Self.cloudStoreProductID) }
+                    purchaseReadinessStatus = "Missing from RevenueCat current offering: \(missing.joined(separator: ", "))."
+                }
+            } catch {
+                purchaseReadinessLooksGood = false
+                purchaseReadinessStatus = "Purchase check failed: \(error.localizedDescription)"
+            }
+        }
+#else
+        purchaseReadinessLooksGood = false
+        purchaseReadinessStatus = "RevenueCat SDK is unavailable in this build."
+#endif
     }
 
     func restorePurchases() {
@@ -2768,6 +3032,16 @@ private final class NativeVaultViewModel: ObservableObject {
         guard let current = offerings.current else { return nil }
 
         let candidates = current.availablePackages
+        if tier == .pro,
+           let exactMatch = candidates.first(where: { $0.storeProduct.productIdentifier.caseInsensitiveCompare(Self.proStoreProductID) == .orderedSame }) {
+            return exactMatch
+        }
+
+        if tier == .cloud,
+           let exactMatch = candidates.first(where: { $0.storeProduct.productIdentifier.caseInsensitiveCompare(Self.cloudStoreProductID) == .orderedSame }) {
+            return exactMatch
+        }
+
         if tier == .cloud {
             return candidates.first(where: { $0.storeProduct.productIdentifier.lowercased().contains("cloud") || $0.identifier.lowercased().contains("cloud") })
         }
@@ -2790,6 +3064,65 @@ private final class NativeVaultViewModel: ObservableObject {
         UserDefaults.standard.set(selectedTier.rawValue, forKey: planStorageKey)
     }
 #endif
+
+    private func isNotificationAuthorized(_ status: UNAuthorizationStatus) -> Bool {
+        if status == .authorized || status == .provisional {
+            return true
+        }
+        if #available(iOS 14.0, *), status == .ephemeral {
+            return true
+        }
+        return false
+    }
+
+    private func notificationStatusSummary(for status: UNAuthorizationStatus) -> String {
+        switch status {
+        case .authorized:
+            return "Allowed"
+        case .provisional:
+            return "Provisionally allowed"
+        case .denied:
+            return "Denied in iOS Settings"
+        case .notDetermined:
+            return "Not requested"
+        @unknown default:
+            if #available(iOS 14.0, *), status == .ephemeral {
+                return "Temporarily allowed"
+            }
+            return "Unknown"
+        }
+    }
+
+    private func ensureNotificationAuthorization() async throws -> Bool {
+        let currentStatus = await NativeNotificationManager.notificationStatus()
+        if isNotificationAuthorized(currentStatus) {
+            return true
+        }
+
+        if currentStatus == .denied {
+            refreshNotificationStatus()
+            alertState = AlertState(message: "Notifications are denied for PassGen. Enable them from iOS Settings > Notifications > PassGen.")
+            return false
+        }
+
+        let granted = try await NativeNotificationManager.requestAuthorization()
+        refreshNotificationStatus()
+        if !granted {
+            alertState = AlertState(message: "Notifications were not enabled. You can allow them later from iOS Settings.")
+        }
+        return granted
+    }
+
+    private func syncNotificationReminder() async throws {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: notificationReminderTime)
+        let hour = components.hour ?? 20
+        let minute = components.minute ?? 0
+        try await NativeNotificationManager.syncDailyReminder(
+            hour: hour,
+            minute: minute,
+            enabled: notificationReminderEnabled
+        )
+    }
 
     func refreshEntries() {
         do {
@@ -2918,6 +3251,21 @@ private final class NativeVaultViewModel: ObservableObject {
             guard !success else { return }
             Task { @MainActor in
                 self?.alertState = AlertState(message: "Unable to open link.")
+            }
+        }
+    }
+
+    @MainActor
+    func openAppSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else {
+            alertState = AlertState(message: "Unable to open iOS Settings.")
+            return
+        }
+
+        UIApplication.shared.open(url, options: [:]) { [weak self] success in
+            guard !success else { return }
+            Task { @MainActor in
+                self?.alertState = AlertState(message: "Unable to open iOS Settings.")
             }
         }
     }
@@ -3207,6 +3555,10 @@ private struct NativePlansView: View {
                     viewModel.restorePurchases()
                 }
                 .disabled(viewModel.planBusy)
+
+                Text(viewModel.purchaseReadinessStatus)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(viewModel.purchaseReadinessLooksGood ? .green : .secondary)
             }
             .navigationTitle("Plans")
             .toolbar {
@@ -3218,6 +3570,9 @@ private struct NativePlansView: View {
             }
         }
         .navigationViewStyle(.stack)
+        .onAppear {
+            viewModel.refreshPurchaseReadiness()
+        }
     }
 }
 
@@ -3657,6 +4012,20 @@ private struct NativeSettingsTabView: View {
         )
     }
 
+    private var notificationReminderBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.notificationReminderEnabled },
+            set: { viewModel.setNotificationReminderEnabled($0) }
+        )
+    }
+
+    private var notificationReminderTimeBinding: Binding<Date> {
+        Binding(
+            get: { viewModel.notificationReminderTime },
+            set: { viewModel.updateNotificationReminderTime($0) }
+        )
+    }
+
     private func makeExportFilename() -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
@@ -3677,6 +4046,23 @@ private struct NativeSettingsTabView: View {
 
                     Button("Manage Plans") {
                         viewModel.showPlanSheet = true
+                    }
+
+                    Text(viewModel.purchaseReadinessStatus)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(viewModel.purchaseReadinessLooksGood ? .green : .secondary)
+
+                    Button("Check Purchase Readiness") {
+                        viewModel.refreshPurchaseReadiness()
+                    }
+                    .disabled(viewModel.purchaseDiagnosticsBusy)
+
+                    if viewModel.purchaseDiagnosticsBusy {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Checking App Store subscriptions...")
+                                .font(.system(size: 13, weight: .medium))
+                        }
                     }
                 }
 
@@ -3852,6 +4238,53 @@ private struct NativeSettingsTabView: View {
                             .font(.system(size: 12, weight: .regular))
                             .foregroundColor(.secondary)
                     }
+                }
+
+                Section("Notifications") {
+                    HStack {
+                        Text("Status")
+                        Spacer()
+                        Text(viewModel.notificationStatusText)
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(viewModel.notificationsAuthorized ? .green : .secondary)
+                    }
+
+                    Button(viewModel.notificationsAuthorized ? "Refresh Notification Status" : "Enable Notifications") {
+                        viewModel.requestNotificationAccess()
+                    }
+                    .disabled(viewModel.notificationsBusy)
+
+                    if !viewModel.notificationsAuthorized {
+                        Button("Open iOS Settings") {
+                            viewModel.openAppSettings()
+                        }
+                    }
+
+                    Toggle("Daily Security Reminder", isOn: notificationReminderBinding)
+
+                    DatePicker(
+                        "Reminder Time",
+                        selection: notificationReminderTimeBinding,
+                        displayedComponents: .hourAndMinute
+                    )
+                    .disabled(!viewModel.notificationReminderEnabled)
+
+                    Button("Send Test Notification") {
+                        viewModel.sendTestNotification()
+                    }
+                    .disabled(viewModel.notificationsBusy)
+
+                    if viewModel.notificationsBusy {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Updating notifications...")
+                                .font(.system(size: 13, weight: .medium))
+                        }
+                    }
+
+                    Text("This build supports local reminder notifications. Remote push notifications are not configured yet.")
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundColor(.secondary)
                 }
 
                 Section("Legal") {
