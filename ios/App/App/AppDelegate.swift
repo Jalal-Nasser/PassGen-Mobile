@@ -1124,6 +1124,9 @@ private final class NativeVaultStore {
     private static let vaultVersion = 1
     private static let keyLength = 32
     private static let iterations = 310_000
+    private static let appGroupIdentifier = "group.com.mdeploy.passgen"
+    private static let vaultFolderName = "PassGenVault"
+    private static let vaultFileName = "passgen-vault.pgvault"
 
     private static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
@@ -1144,12 +1147,12 @@ private final class NativeVaultStore {
 
     init() {
         let fileManager = FileManager.default
-        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let folder = appSupport.appendingPathComponent("PassGenVault", isDirectory: true)
-        if !fileManager.fileExists(atPath: folder.path) {
-            try? fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+        if let sharedURL = Self.sharedVaultURL(using: fileManager) {
+            Self.migrateLegacyVaultIfNeeded(to: sharedURL, using: fileManager)
+            self.vaultURL = sharedURL
+        } else {
+            self.vaultURL = Self.legacyVaultURL(using: fileManager)
         }
-        self.vaultURL = folder.appendingPathComponent("passgen-vault.pgvault")
     }
 
     var encryptedVaultFileURL: URL {
@@ -1396,6 +1399,37 @@ private final class NativeVaultStore {
 
         return data
     }
+
+    private static func sharedVaultURL(using fileManager: FileManager) -> URL? {
+        guard let container = fileManager.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) else {
+            return nil
+        }
+
+        let folder = container.appendingPathComponent(vaultFolderName, isDirectory: true)
+        ensureFolderExists(at: folder, using: fileManager)
+        return folder.appendingPathComponent(vaultFileName)
+    }
+
+    private static func legacyVaultURL(using fileManager: FileManager) -> URL {
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let folder = appSupport.appendingPathComponent(vaultFolderName, isDirectory: true)
+        ensureFolderExists(at: folder, using: fileManager)
+        return folder.appendingPathComponent(vaultFileName)
+    }
+
+    private static func ensureFolderExists(at url: URL, using fileManager: FileManager) {
+        if !fileManager.fileExists(atPath: url.path) {
+            try? fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+        }
+    }
+
+    private static func migrateLegacyVaultIfNeeded(to destinationURL: URL, using fileManager: FileManager) {
+        let legacyURL = legacyVaultURL(using: fileManager)
+        guard legacyURL != destinationURL else { return }
+        guard fileManager.fileExists(atPath: legacyURL.path) else { return }
+        guard !fileManager.fileExists(atPath: destinationURL.path) else { return }
+        try? fileManager.moveItem(at: legacyURL, to: destinationURL)
+    }
 }
 
 @MainActor
@@ -1628,6 +1662,9 @@ private final class NativeVaultViewModel: ObservableObject {
 
     func bootstrap() {
         hasVault = store.hasVault()
+        if !hasVault {
+            clearCredentialIdentities()
+        }
         passwordHint = UserDefaults.standard.string(forKey: hintStorageKey) ?? ""
         showOnboarding = !UserDefaults.standard.bool(forKey: onboardingStorageKey)
         if let storedTier = UserDefaults.standard.string(forKey: planStorageKey),
@@ -3127,6 +3164,7 @@ private final class NativeVaultViewModel: ObservableObject {
     func refreshEntries() {
         do {
             entries = try store.listEntries()
+            syncCredentialIdentities()
         } catch {
             alertState = AlertState(message: "Unable to load vault entries.")
         }
@@ -3316,6 +3354,7 @@ private final class NativeVaultViewModel: ObservableObject {
     func resetAppData() {
         do {
             try store.reset()
+            clearCredentialIdentities()
             UserDefaults.standard.removeObject(forKey: hintStorageKey)
             UserDefaults.standard.removeObject(forKey: onboardingStorageKey)
             UserDefaults.standard.removeObject(forKey: planStorageKey)
@@ -3360,6 +3399,53 @@ private final class NativeVaultViewModel: ObservableObject {
         } catch {
             alertState = AlertState(message: "Unable to reset app data.")
         }
+    }
+
+    private func syncCredentialIdentities() {
+        let identities = entries.compactMap(makePasswordCredentialIdentity)
+        ASCredentialIdentityStore.shared.removeAllCredentialIdentities { _, _ in
+            guard !identities.isEmpty else { return }
+            ASCredentialIdentityStore.shared.saveCredentialIdentities(identities) { _, _ in }
+        }
+    }
+
+    private func clearCredentialIdentities() {
+        ASCredentialIdentityStore.shared.removeAllCredentialIdentities { _, _ in }
+    }
+
+    private func makePasswordCredentialIdentity(for entry: VaultEntry) -> ASPasswordCredentialIdentity? {
+        let username = entry.username.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !username.isEmpty, !entry.password.isEmpty else {
+            return nil
+        }
+
+        guard let serviceIdentifier = makeCredentialServiceIdentifier(for: entry) else {
+            return nil
+        }
+
+        return ASPasswordCredentialIdentity(
+            serviceIdentifier: serviceIdentifier,
+            user: username,
+            recordIdentifier: entry.id
+        )
+    }
+
+    private func makeCredentialServiceIdentifier(for entry: VaultEntry) -> ASCredentialServiceIdentifier? {
+        if let domain = entry.websiteDomain?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !domain.isEmpty {
+            return ASCredentialServiceIdentifier(identifier: domain, type: .domain)
+        }
+
+        if let domain = normalizedDomain(from: entry.url) {
+            return ASCredentialServiceIdentifier(identifier: domain, type: .domain)
+        }
+
+        let trimmedURL = entry.url.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let url = URL(string: trimmedURL), url.scheme != nil {
+            return ASCredentialServiceIdentifier(identifier: trimmedURL, type: .URL)
+        }
+
+        return nil
     }
 }
 
@@ -4283,6 +4369,12 @@ private struct NativeSettingsTabView: View {
                     }
 
                     Text("This build supports local reminder notifications. Remote push notifications are not configured yet.")
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundColor(.secondary)
+                }
+
+                Section("Password AutoFill") {
+                    Text("PassGen AutoFill is included in this build. After installing the updated app, enable it from iOS Settings > Passwords > Password Options.")
                         .font(.system(size: 12, weight: .regular))
                         .foregroundColor(.secondary)
                 }
