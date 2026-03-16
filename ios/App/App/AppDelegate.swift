@@ -4287,12 +4287,6 @@ private struct NativeSettingsTabView: View {
                         .foregroundColor(.secondary)
                 }
 
-                Section("Legal") {
-                    NativeLegalFooterView(onOpenURL: viewModel.openExternal)
-                        .padding(.vertical, 4)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                }
-
                 Section("Security") {
                     Toggle("Enable Biometric Unlock (Face ID)", isOn: passkeyBinding)
                         .disabled(!viewModel.hasVault)
@@ -4310,6 +4304,12 @@ private struct NativeSettingsTabView: View {
                     Button("Reset Local App", role: .destructive) {
                         viewModel.showResetPrompt = true
                     }
+                }
+
+                Section("Legal") {
+                    NativeLegalFooterView(onOpenURL: viewModel.openExternal)
+                        .padding(.vertical, 4)
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
             .navigationTitle("Settings")
