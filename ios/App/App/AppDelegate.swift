@@ -2730,7 +2730,7 @@ private final class NativeVaultViewModel: ObservableObject {
             do {
                 try await configureRevenueCat()
                 let offerings = try await fetchRevenueCatOfferings()
-                guard let current = offerings.current else {
+                guard let current = currentRevenueCatOffering(from: offerings) else {
                     purchaseReadinessStatus = "RevenueCat current offering is missing."
                     return
                 }
@@ -2837,6 +2837,10 @@ private final class NativeVaultViewModel: ObservableObject {
             || normalized.contains("configuration")
             || normalized.contains("product")
         {
+            let details = purchaseReadinessStatus.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !details.isEmpty, details != "Not checked yet." {
+                return "\(tier.title) purchase is not ready yet. \(details)"
+            }
             return "\(tier.title) purchase is not ready yet. Check RevenueCat offerings and App Store product setup, then retry."
         }
 
@@ -3627,7 +3631,7 @@ private final class NativeVaultViewModel: ObservableObject {
     }
 
     private func packageForTier(_ tier: PremiumTier, from offerings: Offerings) -> Package? {
-        guard let current = offerings.current else { return nil }
+        guard let current = currentRevenueCatOffering(from: offerings) else { return nil }
 
         let candidates = current.availablePackages
         if tier == .pro,
@@ -4007,6 +4011,10 @@ private final class NativeVaultViewModel: ObservableObject {
         }
 
         return nil
+    }
+
+    private func currentRevenueCatOffering(from offerings: Offerings) -> Offering? {
+        offerings.current ?? offerings.all["default"]
     }
 }
 
