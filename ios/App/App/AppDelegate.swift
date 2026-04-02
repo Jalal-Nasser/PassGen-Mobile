@@ -2246,7 +2246,8 @@ private final class NativeVaultViewModel: ObservableObject {
         )
         let additionalScopes = [Self.googleDriveScope]
 
-        GIDSignIn.sharedInstance.signIn(with: configuration, presenting: presenter, hint: nil, additionalScopes: additionalScopes) { [weak self] user, error in
+        GIDSignIn.sharedInstance.configuration = configuration
+        GIDSignIn.sharedInstance.signIn(withPresenting: presenter, hint: nil, additionalScopes: additionalScopes) { [weak self] result, error in
             guard let self = self else { return }
             if let error {
                 DispatchQueue.main.async {
@@ -2256,8 +2257,8 @@ private final class NativeVaultViewModel: ObservableObject {
                 return
             }
 
-            guard let user = user,
-                  let idToken = user.authentication.idToken else {
+            guard let user = result?.user,
+                  let idToken = user.idToken?.tokenString else {
                 DispatchQueue.main.async {
                     self.authBusy = false
                     self.alertState = AlertState(message: "Google sign-in failed: missing ID token.")
@@ -3135,17 +3136,17 @@ private final class NativeVaultViewModel: ObservableObject {
         }
 
         let token = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
-            currentUser.authentication.do(freshTokens: { authentication, error in
+            currentUser.refreshTokensIfNeeded { refreshedUser, error in
                 if let error {
                     continuation.resume(throwing: error)
                     return
                 }
-                guard let accessToken = authentication?.accessToken else {
+                guard let accessToken = refreshedUser?.accessToken.tokenString else {
                     continuation.resume(throwing: SupabaseAuthError.requestFailed("Google access token is unavailable."))
                     return
                 }
                 continuation.resume(returning: accessToken)
-            })
+            }
         }
 
         let localModified = store.vaultModifiedAt() ?? .distantPast
