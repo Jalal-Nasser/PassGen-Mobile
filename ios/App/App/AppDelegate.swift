@@ -1355,6 +1355,7 @@ private struct VaultFile: Codable {
 private enum NativeKeychain {
     private static let service = "com.passgen.native.ios"
     private static let account = "vault-master-password"
+    private static let accessGroup = "R9HFGYCSV2.com.mdeploy.passgen.shared"
 
     static func saveMasterPassword(_ password: String) {
         deleteMasterPassword()
@@ -1372,6 +1373,7 @@ private enum NativeKeychain {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
+            kSecAttrAccessGroup as String: accessGroup,
             kSecAttrAccessControl as String: accessControl,
             kSecValueData as String: passwordData
         ]
@@ -1413,6 +1415,7 @@ private enum NativeKeychain {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
+            kSecAttrAccessGroup as String: accessGroup,
             kSecReturnData as String: true,
             kSecUseAuthenticationContext as String: context
         ]
@@ -1431,7 +1434,8 @@ private enum NativeKeychain {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account
+            kSecAttrAccount as String: account,
+            kSecAttrAccessGroup as String: accessGroup
         ]
         SecItemDelete(query as CFDictionary)
     }
@@ -1787,7 +1791,7 @@ private final class NativeVaultStore {
 private final class NativeVaultViewModel: ObservableObject {
     static let companyURL = "https://mdeploy.dev"
     static let developerURL = "https://github.com/Jalal-Nasser/"
-    static let termsURL = "https://mdeploy.dev/terms"
+    static let termsURL = "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/"
     static let privacyURL = "https://mdeploy.dev/privacy"
     static let proStoreProductID = "passgen_pro_monthly"
     static let cloudStoreProductID = "passgen_cloud_monthly"
@@ -4155,6 +4159,7 @@ private struct NativeOnboardingView: View {
 private struct NativePlansView: View {
     @ObservedObject var viewModel: NativeVaultViewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
 
     private var displayedTiers: [PremiumTier] {
         guard let preferred = viewModel.planSheetPreferredTier else {
@@ -4228,6 +4233,29 @@ private struct NativePlansView: View {
                 }
                 .disabled(viewModel.planBusy)
 
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Subscriptions renew automatically unless canceled at least 24 hours before the end of the current billing period.")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
+
+                    HStack(spacing: 10) {
+                        Button("Terms of Use (EULA)") {
+                            guard let url = URL(string: NativeVaultViewModel.termsURL) else { return }
+                            openURL(url)
+                        }
+                        .font(.system(size: 13, weight: .semibold))
+
+                        Button("Privacy Policy") {
+                            guard let url = URL(string: NativeVaultViewModel.privacyURL) else { return }
+                            openURL(url)
+                        }
+                        .font(.system(size: 13, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
+                }
+                .padding(.vertical, 6)
+
                 Text(viewModel.purchaseReadinessStatus)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(viewModel.purchaseReadinessLooksGood ? .green : .secondary)
@@ -4286,7 +4314,7 @@ private struct NativeLegalFooterView: View {
             }
 
             HStack(spacing: 8) {
-                Button("Terms of Service") {
+                Button("Terms of Use") {
                     onOpenURL(NativeVaultViewModel.termsURL)
                 }
                 .font(.system(size: 12, weight: .semibold))

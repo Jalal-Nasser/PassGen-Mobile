@@ -26,5 +26,9 @@
 	<array>
 		<string>group.com.mdeploy.passgen</string>
 	</array>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>R9HFGYCSV2.com.mdeploy.passgen.shared</string>
+	</array>
 </dict>
 </plist>

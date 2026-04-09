@@ -2,11 +2,15 @@ import UIKit
 import AuthenticationServices
 import CryptoKit
 import CommonCrypto
+import LocalAuthentication
 
 private enum PassGenAutoFillConfig {
     static let appGroupIdentifier = "group.com.mdeploy.passgen"
     static let vaultFolderName = "PassGenVault"
     static let vaultFileName = "passgen-vault.pgvault"
+    static let keychainAccessGroup = "R9HFGYCSV2.com.mdeploy.passgen.shared"
+    static let keychainService = "com.passgen.native.ios"
+    static let keychainAccount = "vault-master-password"
 }
 
 private struct AutoFillVaultEntry: Codable, Hashable {
@@ -56,6 +60,9 @@ private enum AutoFillVaultError: LocalizedError {
     case invalidPassword
     case invalidVault
     case encryptionFailure
+    case biometricUnavailable(String)
+    case biometricSecretMissing
+    case biometricVerificationFailed
 
     var errorDescription: String? {
         switch self {
@@ -71,6 +78,57 @@ private enum AutoFillVaultError: LocalizedError {
             return "Your vault data is invalid or corrupted."
         case .encryptionFailure:
             return "Unable to decrypt your vault."
+        case .biometricUnavailable(let reason):
+            return "Biometric unlock is unavailable: \(reason)"
+        case .biometricSecretMissing:
+            return "Open PassGen, enable biometric unlock, and unlock your vault once before using AutoFill."
+        case .biometricVerificationFailed:
+            return "Biometric verification failed."
+        }
+    }
+}
+
+private enum SharedMasterPasswordKeychain {
+    static func readWithBiometrics(prompt: String, completion: @escaping (Result<String, AutoFillVaultError>) -> Void) {
+        let context = LAContext()
+        context.localizedFallbackTitle = ""
+        context.localizedCancelTitle = "Use Master Password"
+
+        var error: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
+            let reason = error?.localizedDescription ?? "Biometric authentication is not available on this device."
+            completion(.failure(.biometricUnavailable(reason)))
+            return
+        }
+
+        context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: prompt) { success, _ in
+            guard success else {
+                completion(.failure(.biometricVerificationFailed))
+                return
+            }
+
+            context.interactionNotAllowed = true
+
+            var item: CFTypeRef?
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: PassGenAutoFillConfig.keychainService,
+                kSecAttrAccount as String: PassGenAutoFillConfig.keychainAccount,
+                kSecAttrAccessGroup as String: PassGenAutoFillConfig.keychainAccessGroup,
+                kSecReturnData as String: true,
+                kSecUseAuthenticationContext as String: context
+            ]
+
+            let status = SecItemCopyMatching(query as CFDictionary, &item)
+            guard status == errSecSuccess,
+                  let data = item as? Data,
+                  let password = String(data: data, encoding: .utf8),
+                  !password.isEmpty else {
+                completion(.failure(.biometricSecretMissing))
+                return
+            }
+
+            completion(.success(password))
         }
     }
 }
@@ -178,17 +236,20 @@ private final class AutoFillVaultStore {
 
 final class CredentialProviderViewController: ASCredentialProviderViewController, UITableViewDataSource, UITableViewDelegate, UISearchBarDelegate, UITextFieldDelegate {
     private let vaultStore: AutoFillVaultStore? = try? AutoFillVaultStore()
-    private let passwordField = UITextField(frame: .zero)
-    private let unlockButton = UIButton(type: .system)
     private let statusLabel = UILabel(frame: .zero)
+    private let passwordField = UITextField(frame: .zero)
+    private let biometricButton = UIButton(type: .system)
+    private let unlockButton = UIButton(type: .system)
     private let searchBar = UISearchBar(frame: .zero)
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
+    private var tableHeightConstraint: NSLayoutConstraint?
 
     private var allEntries: [AutoFillVaultEntry] = []
     private var visibleEntries: [AutoFillVaultEntry] = []
     private var requestedServiceIdentifiers: [ASCredentialServiceIdentifier] = []
     private var requestedRecordIdentifier: String?
     private var isUnlocked = false
+    private var hasAttemptedAutomaticUnlock = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -196,15 +257,22 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         applyFilter()
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        attemptAutomaticBiometricUnlockIfNeeded()
+    }
+
     override func prepareCredentialList(for serviceIdentifiers: [ASCredentialServiceIdentifier]) {
         requestedServiceIdentifiers = serviceIdentifiers
         requestedRecordIdentifier = nil
+        hasAttemptedAutomaticUnlock = false
         applyFilter()
     }
 
     override func prepareInterfaceToProvideCredential(for credentialIdentity: ASPasswordCredentialIdentity) {
         requestedServiceIdentifiers = [credentialIdentity.serviceIdentifier]
         requestedRecordIdentifier = credentialIdentity.recordIdentifier
+        hasAttemptedAutomaticUnlock = false
         applyFilter()
     }
 
@@ -222,15 +290,39 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     private func setupUI() {
         view.backgroundColor = .systemBackground
         title = "PassGen AutoFill"
-        navigationItem.leftBarButtonItem = UIBarButtonItem(barButtonSystemItem: .cancel, target: self, action: #selector(cancelTapped))
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            barButtonSystemItem: .cancel,
+            target: self,
+            action: #selector(cancelTapped)
+        )
+
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+        statusLabel.numberOfLines = 0
+        statusLabel.font = .systemFont(ofSize: 14, weight: .regular)
+        statusLabel.textColor = .secondaryLabel
+        statusLabel.text = vaultStore == nil
+            ? AutoFillVaultError.appGroupUnavailable.localizedDescription
+            : "Unlock PassGen to fill the matching credential."
 
         passwordField.translatesAutoresizingMaskIntoConstraints = false
         passwordField.placeholder = "Master Password"
         passwordField.isSecureTextEntry = true
         passwordField.borderStyle = .roundedRect
         passwordField.textContentType = .password
-        passwordField.delegate = self
         passwordField.returnKeyType = .go
+        passwordField.delegate = self
+        passwordField.autocapitalizationType = .none
+        passwordField.autocorrectionType = .no
+        passwordField.clearButtonMode = .whileEditing
+
+        biometricButton.translatesAutoresizingMaskIntoConstraints = false
+        biometricButton.setTitle("Unlock with Face ID / Touch ID", for: .normal)
+        biometricButton.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
+        biometricButton.backgroundColor = .secondarySystemBackground
+        biometricButton.tintColor = .label
+        biometricButton.layer.cornerRadius = 12
+        biometricButton.contentEdgeInsets = UIEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)
+        biometricButton.addTarget(self, action: #selector(biometricTapped), for: .touchUpInside)
 
         unlockButton.translatesAutoresizingMaskIntoConstraints = false
         unlockButton.setTitle("Unlock Vault", for: .normal)
@@ -241,14 +333,6 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         unlockButton.contentEdgeInsets = UIEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)
         unlockButton.addTarget(self, action: #selector(unlockTapped), for: .touchUpInside)
 
-        statusLabel.translatesAutoresizingMaskIntoConstraints = false
-        statusLabel.numberOfLines = 0
-        statusLabel.font = .systemFont(ofSize: 14, weight: .regular)
-        statusLabel.textColor = .secondaryLabel
-        statusLabel.text = vaultStore == nil
-            ? AutoFillVaultError.appGroupUnavailable.localizedDescription
-            : "Unlock PassGen with your master password to autofill credentials."
-
         searchBar.translatesAutoresizingMaskIntoConstraints = false
         searchBar.placeholder = "Search credentials"
         searchBar.autocapitalizationType = .none
@@ -258,22 +342,51 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         tableView.translatesAutoresizingMaskIntoConstraints = false
         tableView.dataSource = self
         tableView.delegate = self
-        tableView.isHidden = true
         tableView.keyboardDismissMode = .onDrag
+        tableView.rowHeight = 60
+        tableView.tableFooterView = UIView(frame: .zero)
+        tableView.isHidden = true
 
-        let stack = UIStackView(arrangedSubviews: [passwordField, unlockButton, statusLabel, searchBar, tableView])
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.axis = .vertical
-        stack.spacing = 12
-        view.addSubview(stack)
+        view.addSubview(statusLabel)
+        view.addSubview(passwordField)
+        view.addSubview(biometricButton)
+        view.addSubview(unlockButton)
+        view.addSubview(searchBar)
+        view.addSubview(tableView)
+
+        tableHeightConstraint = tableView.heightAnchor.constraint(equalToConstant: 0)
+        tableHeightConstraint?.isActive = true
 
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
-            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -16),
-            tableView.heightAnchor.constraint(greaterThanOrEqualToConstant: 260)
+            statusLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            statusLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            statusLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+
+            passwordField.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 14),
+            passwordField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            passwordField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            passwordField.heightAnchor.constraint(equalToConstant: 52),
+
+            biometricButton.topAnchor.constraint(equalTo: passwordField.bottomAnchor, constant: 12),
+            biometricButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            biometricButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            biometricButton.heightAnchor.constraint(equalToConstant: 52),
+
+            unlockButton.topAnchor.constraint(equalTo: biometricButton.bottomAnchor, constant: 12),
+            unlockButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            unlockButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            unlockButton.heightAnchor.constraint(equalToConstant: 52),
+
+            searchBar.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 8),
+            searchBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
+            searchBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8),
+
+            tableView.topAnchor.constraint(equalTo: searchBar.bottomAnchor, constant: 8),
+            tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
+
+        updateVisibleState()
     }
 
     @objc private func cancelTapped() {
@@ -285,6 +398,10 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
 
     @objc private func unlockTapped() {
         unlockVaultAndRefresh()
+    }
+
+    @objc private func biometricTapped() {
+        unlockWithBiometrics()
     }
 
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
@@ -300,28 +417,74 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
 
         do {
             let unlockedEntries = try vaultStore.unlock(password: passwordField.text ?? "")
-            allEntries = unlockedEntries.filter { !$0.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !$0.password.isEmpty }
-            isUnlocked = true
-            searchBar.isHidden = false
-            tableView.isHidden = false
             passwordField.resignFirstResponder()
-
-            if allEntries.isEmpty {
-                statusLabel.text = "No saved usernames and passwords are available for AutoFill yet."
-            } else {
-                statusLabel.text = "Select the credential you want to fill."
-            }
-
-            if let requestedRecordIdentifier,
-               let exact = allEntries.first(where: { $0.id == requestedRecordIdentifier }) {
-                complete(with: exact)
-                return
-            }
-
-            applyFilter()
+            applyUnlockedEntries(unlockedEntries, preferDirectFill: true)
         } catch {
             statusLabel.text = (error as? LocalizedError)?.errorDescription ?? "Unable to unlock PassGen AutoFill."
         }
+    }
+
+    private func unlockWithBiometrics() {
+        SharedMasterPasswordKeychain.readWithBiometrics(prompt: "Unlock PassGen AutoFill") { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                guard let vaultStore = self.vaultStore else {
+                    self.statusLabel.text = AutoFillVaultError.appGroupUnavailable.localizedDescription
+                    return
+                }
+
+                switch result {
+                case .success(let password):
+                    do {
+                        let unlockedEntries = try vaultStore.unlock(password: password)
+                        self.applyUnlockedEntries(unlockedEntries, preferDirectFill: true)
+                    } catch {
+                        self.statusLabel.text = (error as? LocalizedError)?.errorDescription ?? "Unable to unlock PassGen AutoFill."
+                    }
+                case .failure(let error):
+                    self.statusLabel.text = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func attemptAutomaticBiometricUnlockIfNeeded() {
+        guard !hasAttemptedAutomaticUnlock else { return }
+        guard requestedRecordIdentifier != nil || !requestedServiceIdentifiers.isEmpty else { return }
+        hasAttemptedAutomaticUnlock = true
+        unlockWithBiometrics()
+    }
+
+    private func applyUnlockedEntries(_ unlockedEntries: [AutoFillVaultEntry], preferDirectFill: Bool) {
+        allEntries = unlockedEntries.filter {
+            !$0.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !$0.password.isEmpty
+        }
+        isUnlocked = true
+        updateVisibleState()
+
+        guard !allEntries.isEmpty else {
+            statusLabel.text = "No saved usernames and passwords are available for AutoFill yet."
+            applyFilter()
+            return
+        }
+
+        if preferDirectFill, let preferredEntry = resolvePreferredEntry(from: allEntries) {
+            complete(with: preferredEntry)
+            return
+        }
+
+        statusLabel.text = "Select the credential you want to fill."
+        applyFilter()
+    }
+
+    private func updateVisibleState() {
+        let isLocked = !isUnlocked
+        passwordField.isHidden = !isLocked
+        biometricButton.isHidden = !isLocked
+        unlockButton.isHidden = !isLocked
+        searchBar.isHidden = isLocked
+        tableView.isHidden = isLocked
+        tableHeightConstraint?.constant = isLocked ? 0 : 420
     }
 
     private func applyFilter() {
@@ -343,9 +506,15 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
             if query.isEmpty {
                 matchesQuery = true
             } else {
-                let haystack = [entry.name, entry.username, entry.url, entry.websiteDomain ?? "", entry.websiteDescription ?? ""]
-                    .joined(separator: " ")
-                    .lowercased()
+                let haystack = [
+                    entry.name,
+                    entry.username,
+                    entry.url,
+                    entry.websiteDomain ?? "",
+                    entry.websiteDescription ?? ""
+                ]
+                .joined(separator: " ")
+                .lowercased()
                 matchesQuery = haystack.contains(query)
             }
 
@@ -356,6 +525,28 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         }
 
         tableView.reloadData()
+    }
+
+    private func resolvePreferredEntry(from entries: [AutoFillVaultEntry]) -> AutoFillVaultEntry? {
+        if let requestedRecordIdentifier,
+           let exact = entries.first(where: { $0.id == requestedRecordIdentifier }) {
+            return exact
+        }
+
+        let requestedDomains = requestedServiceDomains()
+        guard !requestedDomains.isEmpty else { return nil }
+
+        let matches = entries.filter { entry in
+            requestedDomains.contains { domain in
+                entryMatches(entry, requestedDomain: domain)
+            }
+        }
+
+        if matches.count == 1 {
+            return matches[0]
+        }
+
+        return nil
     }
 
     private func requestedServiceDomains() -> [String] {
@@ -372,9 +563,15 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     }
 
     private func entryMatches(_ entry: AutoFillVaultEntry, requestedDomain: String) -> Bool {
-        let candidates = [entry.websiteDomain, normalizeDomain(entry.url), normalizeDomain(entry.name)]
+        let candidates = [
+            entry.websiteDomain,
+            normalizeDomain(entry.url),
+            normalizeDomain(entry.name)
+        ]
         return candidates.compactMap { $0 }.contains { candidate in
-            candidate == requestedDomain || candidate.hasSuffix("." + requestedDomain) || requestedDomain.hasSuffix("." + candidate)
+            candidate == requestedDomain
+                || candidate.hasSuffix("." + requestedDomain)
+                || requestedDomain.hasSuffix("." + candidate)
         }
     }
 
@@ -408,11 +605,16 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let reuseIdentifier = "credential-cell"
-        let cell = tableView.dequeueReusableCell(withIdentifier: reuseIdentifier) ?? UITableViewCell(style: .subtitle, reuseIdentifier: reuseIdentifier)
+        let cell = tableView.dequeueReusableCell(withIdentifier: reuseIdentifier)
+            ?? UITableViewCell(style: .subtitle, reuseIdentifier: reuseIdentifier)
+
         let entry = visibleEntries[indexPath.row]
         cell.textLabel?.text = entry.name.isEmpty ? entry.username : entry.name
-
-        let subtitleParts = [entry.username, entry.websiteDomain ?? normalizeDomain(entry.url) ?? ""].filter { !$0.isEmpty }
+        let subtitleParts = [
+            entry.username,
+            entry.websiteDomain ?? normalizeDomain(entry.url) ?? ""
+        ]
+        .filter { !$0.isEmpty }
         cell.detailTextLabel?.text = subtitleParts.joined(separator: " • ")
         cell.accessoryType = .disclosureIndicator
         return cell
