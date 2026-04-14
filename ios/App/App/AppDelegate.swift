@@ -26,13 +26,13 @@ private enum MobileRuntimeConfigError: LocalizedError {
         case .missingKeys(let keys):
             return "Missing iOS runtime config keys: \(keys.joined(separator: ", ")). Add them in Ionic Appflow Native Config."
         case .invalidURL(let value):
-            return "Invalid Supabase URL in iOS runtime config: \(value)"
+            return "Invalid iOS runtime URL: \(value)"
         }
     }
 }
 
 private struct MobileRuntimeConfig {
-    static let lockedSupabaseURLString = "https://msapggfdkgugctycrbqi.supabase.co"
+    static let lockedSupabaseURLString = "https://localhost.invalid"
     private static let legacySupabaseHosts: Set<String> = [
         "fnnwyxadidptaziqvfvy.supabase.co"
     ]
@@ -47,13 +47,7 @@ private struct MobileRuntimeConfig {
 
     static func load() throws -> MobileRuntimeConfig {
         let bundle = Bundle.main
-        let requiredKeys = [
-            "PassGenSupabaseAnonKey",
-            "PassGenRevenueCatAPIKey",
-            "PassGenGoogleIOSClientID",
-            "PassGenGoogleReversedClientID",
-            "PassGenGoogleServerClientID"
-        ]
+        let requiredKeys = ["PassGenRevenueCatAPIKey"]
 
         var values: [String: String] = [:]
         var missing: [String] = []
@@ -691,7 +685,7 @@ private enum PremiumTier: String, CaseIterable, Hashable {
         case .pro:
             return "Unlimited passwords + exports"
         case .cloud:
-            return "Unlimited + cloud backup tools"
+            return "Unlimited + iCloud backup tools"
         }
     }
 
@@ -718,12 +712,12 @@ private enum PremiumTier: String, CaseIterable, Hashable {
             return [
                 "Unlimited password entries",
                 "Export encrypted backups",
-                "Developer API key generation"
+                "Priority unlock features"
             ]
         case .cloud:
             return [
                 "Everything in PRO",
-                "Automatic encrypted iCloud / Google Drive sync",
+                "Automatic encrypted iCloud backup sync",
                 "Import encrypted backup + iCloud Passwords CSV",
                 "Export encrypted vault backups"
             ]
@@ -2082,7 +2076,7 @@ private final class NativeVaultViewModel: ObservableObject {
         developerAPIKey = NativeDeveloperAPIKeyKeychain.read() ?? ""
         if let providerRaw = UserDefaults.standard.string(forKey: cloudProviderStorageKey),
            let provider = CloudSyncProvider(rawValue: providerRaw) {
-            cloudSyncProvider = provider
+            cloudSyncProvider = provider == .googleDrive ? .none : provider
         } else {
             cloudSyncProvider = .none
         }
@@ -2528,8 +2522,8 @@ private final class NativeVaultViewModel: ObservableObject {
         }
 
         guard hasCloudTools else {
-            alertState = AlertState(message: "Import from iCloud/Google Drive is available on the CLOUD monthly plan.")
-            presentPlanSheet(focusingOn: .cloud, message: "Google Drive and iCloud import require the CLOUD monthly plan.")
+            alertState = AlertState(message: "Import from iCloud is available on the CLOUD monthly plan.")
+            presentPlanSheet(focusingOn: .cloud, message: "Encrypted iCloud backup import requires the CLOUD monthly plan.")
             return
         }
 
@@ -2675,9 +2669,10 @@ private final class NativeVaultViewModel: ObservableObject {
     }
 
     func setCloudProvider(_ provider: CloudSyncProvider) {
-        cloudSyncProvider = provider
-        UserDefaults.standard.set(provider.rawValue, forKey: cloudProviderStorageKey)
-        if provider == .none {
+        let normalizedProvider = provider == .googleDrive ? CloudSyncProvider.none : provider
+        cloudSyncProvider = normalizedProvider
+        UserDefaults.standard.set(normalizedProvider.rawValue, forKey: cloudProviderStorageKey)
+        if normalizedProvider == .none {
             cloudSyncStatus = "Cloud sync disabled"
             stopCloudSyncTimer()
         } else if isUnlocked {
@@ -4535,46 +4530,11 @@ private struct NativeUnlockView: View {
                 .foregroundColor(Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
                 .cornerRadius(12)
 
-                VStack(spacing: 10) {
-                    Text("Optional account sign-in")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(Color.white.opacity(0.92))
-                    HStack(spacing: 14) {
-                        NativeAppleIconButton(disabled: viewModel.authBusy) { result in
-                            switch result {
-                            case .success(let authorization):
-                                if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
-                                    viewModel.connectAppleAccount(credential: credential)
-                                } else {
-                                    viewModel.alertState = AlertState(message: "Apple sign-in failed: missing Apple ID credential.")
-                                }
-                            case .failure(let error):
-                                viewModel.alertState = AlertState(message: "Apple sign-in failed: \(error.localizedDescription)")
-                            }
-                        }
-
-                        NativeGoogleIconButton(action: {
-                            viewModel.connectGoogleAccount()
-                        }, disabled: viewModel.authBusy)
-                    }
-                    .frame(maxWidth: .infinity)
-
-                    if viewModel.authBusy {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                                .tint(.white)
-                            Text("Signing in...")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(Color.white.opacity(0.92))
-                        }
-                    }
-
-                    Text("Vault works without sign-in. Sign in for plan and cloud sync features.")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(Color.white.opacity(0.84))
-                        .multilineTextAlignment(.center)
-                }
-                .padding(.top, 4)
+                Text("PassGen works fully on-device with local vault storage, Face ID unlock, and App Store plan upgrades.")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(Color.white.opacity(0.84))
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 6)
             }
             .padding(18)
             .background(Color.white.opacity(0.2))
@@ -4866,146 +4826,17 @@ private struct NativeSettingsTabView: View {
                     }
                 }
 
-                Section("Authentication") {
-                    if let runtimeConfigIssue = viewModel.runtimeConfigIssue, !runtimeConfigIssue.isEmpty {
-                        Text(runtimeConfigIssue)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.red)
-                    }
-
-                    HStack {
-                        Text("Connected Account")
-                        Spacer()
-                        Text(viewModel.authProviderLabel)
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(.secondary)
-                    }
-
-                    if !viewModel.authEmail.isEmpty {
-                        Text(viewModel.authEmail)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.secondary)
-                    }
-                    HStack(spacing: 14) {
-                        NativeAppleIconButton(disabled: viewModel.authBusy) { result in
-                            switch result {
-                            case .success(let authorization):
-                                if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
-                                    viewModel.connectAppleAccount(credential: credential)
-                                } else {
-                                    viewModel.alertState = AlertState(message: "Apple sign-in failed: missing Apple ID credential.")
-                                }
-                            case .failure(let error):
-                                viewModel.alertState = AlertState(message: "Apple sign-in failed: \(error.localizedDescription)")
-                            }
-                        }
-
-                        NativeGoogleIconButton(action: {
-                            viewModel.connectGoogleAccount()
-                        }, disabled: viewModel.authBusy)
-                    }
-                    .frame(maxWidth: .infinity)
-
-                    if viewModel.authBusy {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                            Text("Signing in...")
-                                .font(.system(size: 13, weight: .medium))
-                        }
-                    }
-
-                    if viewModel.authProviderLabel != "Not Connected" {
-                        Button("Disconnect Account", role: .destructive) {
-                            viewModel.disconnectAccount()
-                        }
-
-                        Button("Delete Account", role: .destructive) {
-                            viewModel.showDeleteAccountPrompt = true
-                        }
-
-                        Text("Delete Account permanently removes your PassGen cloud account and linked cloud data.")
-                            .font(.system(size: 12, weight: .regular))
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                Section("Developer API") {
-                    if viewModel.isPaidTier {
-                        Picker("Target", selection: $viewModel.selectedDeveloperTarget) {
-                            ForEach(viewModel.developerTargets, id: \.self) { target in
-                                Text(target).tag(target)
-                            }
-                        }
-
-                        Text("Active keys: \(viewModel.activeDeveloperAPIKeyCount)/3")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.secondary)
-
-                        if viewModel.developerAPIKey.isEmpty {
-                            Button("Generate API Key") {
-                                viewModel.generateDeveloperAPIKey()
-                            }
-                            .disabled(viewModel.activeDeveloperAPIKeyCount >= 3)
-                        } else {
-                            Text(viewModel.developerAPIKey)
-                                .font(.system(.footnote, design: .monospaced))
-                                .textSelection(.enabled)
-
-                            Button("Copy API Key") {
-                                viewModel.copyToClipboard(viewModel.developerAPIKey, label: "API key")
-                            }
-
-                            Button("Copy \(viewModel.selectedDeveloperTarget) Snippet") {
-                                viewModel.copyToClipboard(viewModel.developerAPISnippet, label: "API snippet")
-                            }
-                        }
-
-                        if !viewModel.apiKeySummaries.isEmpty {
-                            ForEach(viewModel.apiKeySummaries) { key in
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(key.keyPrefix)
-                                            .font(.system(.footnote, design: .monospaced))
-                                        Text(key.label)
-                                            .font(.system(size: 11, weight: .regular))
-                                            .foregroundColor(.secondary)
-                                    }
-                                    Spacer()
-                                    Text(key.isRevoked ? "Revoked" : "Active")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundColor(key.isRevoked ? .red : .green)
-                                    if !key.isRevoked {
-                                        Button("Revoke", role: .destructive) {
-                                            viewModel.revokeDeveloperAPIKey(keyID: key.id)
-                                        }
-                                        .font(.system(size: 12, weight: .semibold))
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        Text("Developer API key generation is available on PRO and CLOUD monthly plans.")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.secondary)
-
-                        Button("Upgrade to PRO or CLOUD") {
-                            viewModel.presentPlanSheet(focusingOn: .pro, message: "Developer API keys require a paid plan. PRO or CLOUD will unlock this feature.")
-                        }
-                    }
-                }
-
-                Section("Cloud Backup") {
-                    Text("CLOUD plan supports backup import from iCloud Drive / Google Drive and backup export through Files.")
+                Section("Backup") {
+                    Text("Back up your encrypted vault locally or sync through iCloud on the CLOUD plan.")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.secondary)
 
                     Picker("Provider", selection: Binding(
-                        get: { viewModel.cloudSyncProvider },
-                        set: { viewModel.setCloudProvider($0) }
+                        get: { viewModel.cloudSyncProvider == .googleDrive ? .none : viewModel.cloudSyncProvider },
+                        set: { viewModel.setCloudProvider($0 == .googleDrive ? .none : $0) }
                     )) {
-                        ForEach(CloudSyncProvider.allCases, id: \.self) { provider in
-                            Text(provider.title).tag(provider)
-                        }
+                        Text("None").tag(CloudSyncProvider.none)
+                        Text("iCloud Drive").tag(CloudSyncProvider.icloud)
                     }
                     .disabled(!viewModel.hasCloudTools)
 
@@ -5014,6 +4845,7 @@ private struct NativeSettingsTabView: View {
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.secondary)
                     }
+
                     Text(viewModel.cloudSyncStatus)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.secondary)
@@ -5032,12 +4864,12 @@ private struct NativeSettingsTabView: View {
                     }
                     .disabled(!viewModel.isPaidTier)
 
-                    Button("Import from iCloud / Google Drive") {
+                    Button("Import from iCloud Files") {
                         if viewModel.hasCloudTools {
                             showImportPicker = true
                         } else {
-                            viewModel.alertState = AlertState(message: "Upgrade to CLOUD to import backups from iCloud/Google Drive.")
-                            viewModel.presentPlanSheet(focusingOn: .cloud, message: "Google Drive and iCloud import require the CLOUD monthly plan.")
+                            viewModel.alertState = AlertState(message: "Upgrade to CLOUD to import backups from iCloud.")
+                            viewModel.presentPlanSheet(focusingOn: .cloud, message: "Encrypted iCloud backup import requires the CLOUD monthly plan.")
                         }
                     }
 

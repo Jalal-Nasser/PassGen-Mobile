@@ -1,53 +1,46 @@
 # PassGen Mobile Appflow Runtime Config
 
-This mobile app does **not** read local `.env` values for iOS runtime features.
+This mobile app is local-first. It does not require Supabase or Google auth runtime values.
 
 ## Appflow Environment Group
 
 Create an Appflow environment group named `mobile-production` and set:
 
-```markdown
-- `IOS_SUPABASE_URL=https://msapggfdkgugctycrbqi.supabase.co`
-```
-- `IOS_SUPABASE_ANON_KEY=<Supabase anon key for msapggfdkgugctycrbqi>`
 - `IOS_REVENUECAT_API_KEY=<appl_...>`
-- `IOS_GOOGLE_IOS_CLIENT_ID=<iOS OAuth client id>`
-- `IOS_GOOGLE_REVERSED_CLIENT_ID=<reversed iOS OAuth client id>`
-- `IOS_GOOGLE_SERVER_CLIENT_ID=<Google web client id>`
 - `IOS_DRIVE_APP_FOLDER=PassGenVault`
 
 ## Appflow Native Config Mapping
 
 Map these values into `Info.plist`:
 
-- `PassGenSupabaseURL`
-- `PassGenSupabaseAnonKey`
 - `PassGenRevenueCatAPIKey`
-- `PassGenGoogleIOSClientID`
-- `PassGenGoogleReversedClientID`
-- `PassGenGoogleServerClientID`
 - `PassGenDriveAppFolder`
 
 ## Required iOS Capabilities
 
-- Sign In with Apple
 - iCloud Documents (CloudDocuments)
 - Associated app entitlement file: `ios/App/App/App.entitlements`
 
-## RevenueCat Configuration (Dashboard Setup)
+## RevenueCat Configuration
 
-To ensure the native mobile app correctly unlocks Premium features, the RevenueCat dashboard must be configured with the following exact identifiers mapping to your Apple App Store Connect setup:
+To unlock paid plans in the native iOS app, configure RevenueCat with:
 
-1. **Entitlements** (Access Levels):
-   - `pro` (For the PRO Plan)
-   - `cloud` (For the CLOUD Plan)
+1. **Products**:
+   - `passgen_pro_monthly`
+   - `passgen_cloud_monthly`
 
-2. **Products** (App Store SKUs):
-   - `passgen_pro_monthly` (Attach this to the `pro` entitlement)
-   - `passgen_cloud_monthly` (Attach this to the `cloud` entitlement)
-
-3. **Offerings** (Paywall Grouping):
+2. **Offerings**:
    - Identifier: `default`
-   - Include both App Store products in this offering so the iOS app can resolve `passgen_pro_monthly` and `passgen_cloud_monthly`.
+   - Include both App Store subscription products in this offering
 
-*Note: The iOS App-Specific API Key (`appl_...`) generated from RevenueCat is injected during the cloud build via the `IOS_REVENUECAT_API_KEY` Appflow variable.*
+3. **Restore Purchases**:
+   - Keep restore available in the app so previously purchased subscriptions can be recovered on reinstall or a new device.
+
+## Mobile Product Surface
+
+- No account creation
+- No Apple/Google sign-in
+- No Supabase runtime dependency
+- Local encrypted vault
+- RevenueCat for App Store subscriptions
+- iCloud backup/sync on CLOUD plan
