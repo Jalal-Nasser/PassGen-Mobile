@@ -7,7 +7,7 @@ This mobile app does **not** read local `.env` values for iOS runtime features.
 Create an Appflow environment group named `mobile-production` and set:
 
 ```markdown
-- `IOS_SUPABASE_URL=https://fnnwyxadidptaziqvfvy.supabase.co`
+- `IOS_SUPABASE_URL=https://msapggfdkgugctycrbqi.supabase.co`
 ```
 - `IOS_SUPABASE_ANON_KEY=<Supabase anon key for msapggfdkgugctycrbqi>`
 - `IOS_REVENUECAT_API_KEY=<appl_...>`
@@ -48,6 +48,6 @@ To ensure the native mobile app correctly unlocks Premium features, the RevenueC
 
 3. **Offerings** (Paywall Grouping):
    - Identifier: `default`
-   - Create two packages inside this offering: `pro_package` (containing the Pro product) and `cloud_package` (containing the Cloud product).
+   - Include both App Store products in this offering so the iOS app can resolve `passgen_pro_monthly` and `passgen_cloud_monthly`.
 
 *Note: The iOS App-Specific API Key (`appl_...`) generated from RevenueCat is injected during the cloud build via the `IOS_REVENUECAT_API_KEY` Appflow variable.*

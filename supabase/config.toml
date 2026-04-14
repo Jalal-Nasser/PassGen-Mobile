@@ -50,6 +50,9 @@ verify_jwt = true
 [functions."mobile-api-keys-verify"]
 verify_jwt = false
 
+[functions."mobile-account-delete"]
+verify_jwt = true
+
 [functions."revenuecat-webhook"]
 verify_jwt = false
 

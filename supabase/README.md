@@ -29,6 +29,7 @@ supabase functions deploy mobile-api-keys-create
 supabase functions deploy mobile-api-keys-list
 supabase functions deploy mobile-api-keys-revoke
 supabase functions deploy mobile-api-keys-verify
+supabase functions deploy mobile-account-delete
 supabase functions deploy revenuecat-webhook
 ```
 

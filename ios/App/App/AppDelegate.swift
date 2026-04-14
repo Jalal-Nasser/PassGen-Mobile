@@ -32,6 +32,11 @@ private enum MobileRuntimeConfigError: LocalizedError {
 }
 
 private struct MobileRuntimeConfig {
+    static let lockedSupabaseURLString = "https://msapggfdkgugctycrbqi.supabase.co"
+    private static let legacySupabaseHosts: Set<String> = [
+        "fnnwyxadidptaziqvfvy.supabase.co"
+    ]
+
     let supabaseURL: URL
     let supabaseAnonKey: String
     let revenueCatAPIKey: String
@@ -43,7 +48,6 @@ private struct MobileRuntimeConfig {
     static func load() throws -> MobileRuntimeConfig {
         let bundle = Bundle.main
         let requiredKeys = [
-            "PassGenSupabaseURL",
             "PassGenSupabaseAnonKey",
             "PassGenRevenueCatAPIKey",
             "PassGenGoogleIOSClientID",
@@ -69,12 +73,14 @@ private struct MobileRuntimeConfig {
             throw MobileRuntimeConfigError.missingKeys(missing)
         }
 
-        guard let supabaseURLString = values["PassGenSupabaseURL"],
+        guard let supabaseURLString = configuredSupabaseURLString(from: bundle),
               let supabaseURL = URL(string: supabaseURLString),
               let scheme = supabaseURL.scheme?.lowercased(),
               ["https", "http"].contains(scheme),
               supabaseURL.host != nil else {
-            throw MobileRuntimeConfigError.invalidURL(values["PassGenSupabaseURL"] ?? "")
+            throw MobileRuntimeConfigError.invalidURL(
+                (bundle.object(forInfoDictionaryKey: "PassGenSupabaseURL") as? String) ?? ""
+            )
         }
 
         let driveAppFolder = ((bundle.object(forInfoDictionaryKey: "PassGenDriveAppFolder") as? String)?
@@ -89,6 +95,27 @@ private struct MobileRuntimeConfig {
             googleServerClientID: values["PassGenGoogleServerClientID"] ?? "",
             driveAppFolder: driveAppFolder
         )
+    }
+
+    private static func configuredSupabaseURLString(from bundle: Bundle) -> String? {
+        let rawValue = ((bundle.object(forInfoDictionaryKey: "PassGenSupabaseURL") as? String) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let unresolvedVariable = rawValue.hasPrefix("$(") && rawValue.hasSuffix(")")
+
+        if rawValue.isEmpty || unresolvedVariable || rawValue.contains("REPLACE_ME") {
+            return lockedSupabaseURLString
+        }
+
+        guard let parsed = URL(string: rawValue),
+              let host = parsed.host?.lowercased() else {
+            return lockedSupabaseURLString
+        }
+
+        if legacySupabaseHosts.contains(host) {
+            return lockedSupabaseURLString
+        }
+
+        return rawValue
     }
 }
 
@@ -202,6 +229,11 @@ private struct APIKeyListResponse: Decodable {
 private struct APIKeyRevocationResponse: Decodable {
     let ok: Bool
     let revoked_id: String?
+}
+
+private struct AccountDeletionResponse: Decodable {
+    let ok: Bool
+    let deleted_user_id: String?
 }
 
 private struct MobileAPIKeySummaryDTO: Decodable {
@@ -466,6 +498,18 @@ private final class SupabaseAuthClient {
 
         let data = try await sendAuthorizedRequest(request)
         _ = try JSONDecoder().decode(APIKeyRevocationResponse.self, from: data)
+    }
+
+    func deleteMobileAccount(accessToken: String) async throws {
+        let endpoint = config.supabaseURL.appendingPathComponent("functions/v1/mobile-account-delete")
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["confirm": true], options: [])
+
+        let data = try await sendAuthorizedRequest(request)
+        _ = try JSONDecoder().decode(AccountDeletionResponse.self, from: data)
     }
 
     private func sendTokenRequest(_ request: URLRequest) async throws -> SupabaseSession {
@@ -1815,6 +1859,7 @@ private final class NativeVaultViewModel: ObservableObject {
     @Published var websiteQuery = ""
     @Published var draft = VaultEntryDraft.empty
     @Published var showResetPrompt = false
+    @Published var showDeleteAccountPrompt = false
     @Published var showPlanSheet = false
     @Published var selectedTier: PremiumTier = .free
     @Published var passkeyUnlockEnabled = false
@@ -1835,7 +1880,7 @@ private final class NativeVaultViewModel: ObservableObject {
     @Published var notificationReminderTime = NativeNotificationManager.defaultReminderDate()
     @Published var notificationsBusy = false
     @Published var purchaseDiagnosticsBusy = false
-    @Published var purchaseReadinessStatus = "Not checked yet."
+    @Published var purchaseReadinessStatus = "Store purchases are not available right now."
     @Published var purchaseReadinessLooksGood = false
     @Published var planSheetPreferredTier: PremiumTier?
     @Published var planSheetMessage: String?
@@ -2343,6 +2388,41 @@ private final class NativeVaultViewModel: ObservableObject {
         alertState = AlertState(message: "Account disconnected.")
     }
 
+    func deleteConnectedAccount() {
+        guard let authClient = authClient else {
+            alertState = AlertState(message: "Supabase mobile backend is not configured.")
+            return
+        }
+        guard let activeSession = session else {
+            alertState = AlertState(message: "Sign in first to delete your account.")
+            return
+        }
+
+        authBusy = true
+        Task {
+            defer { authBusy = false }
+            do {
+                let refreshedSession = try await refreshedSessionIfNeeded(activeSession)
+                try await authClient.deleteMobileAccount(accessToken: refreshedSession.accessToken)
+                authProviderLabel = "Not Connected"
+                authEmail = ""
+                session = nil
+                apiKeySummaries = []
+                developerAPIKey = ""
+                cloudSyncProvider = .none
+                cloudSyncStatus = "Cloud sync disabled"
+                UserDefaults.standard.removeObject(forKey: authProviderStorageKey)
+                UserDefaults.standard.removeObject(forKey: authEmailStorageKey)
+                UserDefaults.standard.set(CloudSyncProvider.none.rawValue, forKey: cloudProviderStorageKey)
+                NativeDeveloperAPIKeyKeychain.delete()
+                NativeSessionKeychain.delete()
+                alertState = AlertState(message: "Account deleted. Local vault data remains on this device.")
+            } catch {
+                alertState = AlertState(message: "Account deletion failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     func generateDeveloperAPIKey() {
         guard isPaidTier else {
             alertState = AlertState(message: "Developer API keys are available for PRO and CLOUD plans.")
@@ -2720,7 +2800,7 @@ private final class NativeVaultViewModel: ObservableObject {
 #if canImport(RevenueCat)
         guard runtimeConfig != nil else {
             purchaseReadinessLooksGood = false
-            purchaseReadinessStatus = "RevenueCat runtime config is missing."
+            purchaseReadinessStatus = "Store purchases are not available right now."
             return
         }
 
@@ -2736,7 +2816,7 @@ private final class NativeVaultViewModel: ObservableObject {
                 try await configureRevenueCat()
                 let offerings = try await fetchRevenueCatOfferings()
                 guard let current = currentRevenueCatOffering(from: offerings) else {
-                    purchaseReadinessStatus = "RevenueCat current offering is missing."
+                    purchaseReadinessStatus = "Store purchases are not available right now."
                     return
                 }
 
@@ -2746,21 +2826,18 @@ private final class NativeVaultViewModel: ObservableObject {
 
                 purchaseReadinessLooksGood = hasPro && hasCloud
                 if purchaseReadinessLooksGood {
-                    purchaseReadinessStatus = "Ready: RevenueCat offering '\(current.identifier)' includes PRO and CLOUD App Store subscriptions."
+                    purchaseReadinessStatus = "App Store subscriptions are available."
                 } else {
-                    var missing: [String] = []
-                    if !hasPro { missing.append(Self.proStoreProductID) }
-                    if !hasCloud { missing.append(Self.cloudStoreProductID) }
-                    purchaseReadinessStatus = "Missing from RevenueCat current offering: \(missing.joined(separator: ", "))."
+                    purchaseReadinessStatus = "Store purchases are not available right now."
                 }
             } catch {
                 purchaseReadinessLooksGood = false
-                purchaseReadinessStatus = "Purchase check failed: \(error.localizedDescription)"
+                purchaseReadinessStatus = "Store purchases are not available right now."
             }
         }
 #else
         purchaseReadinessLooksGood = false
-        purchaseReadinessStatus = "RevenueCat SDK is unavailable in this build."
+        purchaseReadinessStatus = "Store purchases are not available right now."
 #endif
     }
 
@@ -2842,11 +2919,7 @@ private final class NativeVaultViewModel: ObservableObject {
             || normalized.contains("configuration")
             || normalized.contains("product")
         {
-            let details = purchaseReadinessStatus.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !details.isEmpty, details != "Not checked yet." {
-                return "\(tier.title) purchase is not ready yet. \(details)"
-            }
-            return "\(tier.title) purchase is not ready yet. Check RevenueCat offerings and App Store product setup, then retry."
+            return "\(tier.title) purchase is temporarily unavailable. Try again later or use Restore Purchases."
         }
 
         return "Purchase failed: \(message)"
@@ -2927,6 +3000,9 @@ private final class NativeVaultViewModel: ObservableObject {
 
     private func signInErrorMessage(provider: NativeAuthProvider, error: Error) -> String {
         let message = error.localizedDescription
+        if message.lowercased().contains("hostname could not be found") {
+            return "Sign-in failed: the mobile backend host is unreachable. Verify the Appflow Native Config points to the mobile Supabase project."
+        }
         if provider == .google && isGoogleNonceMismatch(message: message) {
             return "Google sign-in token mismatch. In Supabase Dashboard > Authentication > Providers > Google, enable \"Skip nonce checks\", save, then retry."
         }
@@ -4061,6 +4137,18 @@ private struct NativeVaultRootView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        .confirmationDialog(
+            "Delete your cloud account?",
+            isPresented: $viewModel.showDeleteAccountPrompt,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Account", role: .destructive) {
+                viewModel.deleteConnectedAccount()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently deletes your PassGen cloud account and linked cloud data. Local vault data on this device stays available.")
+        }
         .sheet(isPresented: $viewModel.showPlanSheet, onDismiss: {
             viewModel.clearPlanSheetContext()
         }) {
@@ -4171,6 +4259,20 @@ private struct NativePlansView: View {
     var body: some View {
         NavigationView {
             List {
+                Button("Restore Purchases") {
+                    viewModel.restorePurchases()
+                }
+                .disabled(viewModel.planBusy)
+
+                if viewModel.planBusy {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Contacting App Store...")
+                            .font(.system(size: 14, weight: .medium))
+                    }
+                    .padding(.vertical, 8)
+                }
+
                 if let message = viewModel.planSheetMessage {
                     Text(message)
                         .font(.system(size: 13, weight: .semibold))
@@ -4219,20 +4321,6 @@ private struct NativePlansView: View {
                     .padding(.vertical, 6)
                 }
 
-                if viewModel.planBusy {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                        Text("Contacting App Store...")
-                            .font(.system(size: 14, weight: .medium))
-                    }
-                    .padding(.vertical, 8)
-                }
-
-                Button("Restore Purchases") {
-                    viewModel.restorePurchases()
-                }
-                .disabled(viewModel.planBusy)
-
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Subscriptions renew automatically unless canceled at least 24 hours before the end of the current billing period.")
                         .font(.system(size: 12, weight: .medium))
@@ -4255,10 +4343,6 @@ private struct NativePlansView: View {
                     .foregroundColor(Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
                 }
                 .padding(.vertical, 6)
-
-                Text(viewModel.purchaseReadinessStatus)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(viewModel.purchaseReadinessLooksGood ? .green : .secondary)
             }
             .navigationTitle("Plans")
             .toolbar {
@@ -4270,9 +4354,6 @@ private struct NativePlansView: View {
             }
         }
         .navigationViewStyle(.stack)
-        .onAppear {
-            viewModel.refreshPurchaseReadiness()
-        }
     }
 }
 
@@ -4771,19 +4852,15 @@ private struct NativeSettingsTabView: View {
                         viewModel.presentPlanSheet()
                     }
 
-                    Text(viewModel.purchaseReadinessStatus)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(viewModel.purchaseReadinessLooksGood ? .green : .secondary)
-
-                    Button("Check Purchase Readiness") {
-                        viewModel.refreshPurchaseReadiness()
+                    Button("Restore Purchases") {
+                        viewModel.restorePurchases()
                     }
-                    .disabled(viewModel.purchaseDiagnosticsBusy)
+                    .disabled(viewModel.planBusy)
 
-                    if viewModel.purchaseDiagnosticsBusy {
+                    if viewModel.planBusy {
                         HStack(spacing: 10) {
                             ProgressView()
-                            Text("Checking App Store subscriptions...")
+                            Text("Contacting App Store...")
                                 .font(.system(size: 13, weight: .medium))
                         }
                     }
@@ -4841,6 +4918,14 @@ private struct NativeSettingsTabView: View {
                         Button("Disconnect Account", role: .destructive) {
                             viewModel.disconnectAccount()
                         }
+
+                        Button("Delete Account", role: .destructive) {
+                            viewModel.showDeleteAccountPrompt = true
+                        }
+
+                        Text("Delete Account permanently removes your PassGen cloud account and linked cloud data.")
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundColor(.secondary)
                     }
                 }
 
