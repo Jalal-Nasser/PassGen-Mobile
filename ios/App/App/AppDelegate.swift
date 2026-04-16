@@ -32,7 +32,7 @@ private enum MobileRuntimeConfigError: LocalizedError {
 }
 
 private struct MobileRuntimeConfig {
-    static let lockedSupabaseURLString = "https://localhost.invalid"
+    static let lockedSupabaseURLString = "https://msapggfdkgugctycrbqi.supabase.co"
     private static let legacySupabaseHosts: Set<String> = [
         "fnnwyxadidptaziqvfvy.supabase.co"
     ]
@@ -47,7 +47,13 @@ private struct MobileRuntimeConfig {
 
     static func load() throws -> MobileRuntimeConfig {
         let bundle = Bundle.main
-        let requiredKeys = ["PassGenRevenueCatAPIKey"]
+        let requiredKeys = [
+            "PassGenSupabaseAnonKey",
+            "PassGenRevenueCatAPIKey",
+            "PassGenGoogleIOSClientID",
+            "PassGenGoogleReversedClientID",
+            "PassGenGoogleServerClientID"
+        ]
 
         var values: [String: String] = [:]
         var missing: [String] = []
@@ -616,13 +622,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         let rootView = NativeVaultRootView(viewModel: viewModel)
         let hostingController = UIHostingController(rootView: rootView)
         hostingController.view.backgroundColor = .systemBackground
+        hostingController.overrideUserInterfaceStyle = .light
 
         if let existingWindow = self.window {
             existingWindow.rootViewController = hostingController
+            existingWindow.overrideUserInterfaceStyle = .light
             existingWindow.makeKeyAndVisible()
         } else {
             let newWindow = UIWindow(frame: UIScreen.main.bounds)
             newWindow.rootViewController = hostingController
+            newWindow.overrideUserInterfaceStyle = .light
             self.window = newWindow
             newWindow.makeKeyAndVisible()
         }
@@ -685,7 +694,7 @@ private enum PremiumTier: String, CaseIterable, Hashable {
         case .pro:
             return "Unlimited passwords + exports"
         case .cloud:
-            return "Unlimited + iCloud backup tools"
+            return "Unlimited + cloud backup tools"
         }
     }
 
@@ -712,12 +721,12 @@ private enum PremiumTier: String, CaseIterable, Hashable {
             return [
                 "Unlimited password entries",
                 "Export encrypted backups",
-                "Priority unlock features"
+                "Developer API key generation"
             ]
         case .cloud:
             return [
                 "Everything in PRO",
-                "Automatic encrypted iCloud backup sync",
+                "Automatic encrypted iCloud / Google Drive sync",
                 "Import encrypted backup + iCloud Passwords CSV",
                 "Export encrypted vault backups"
             ]
@@ -2076,7 +2085,7 @@ private final class NativeVaultViewModel: ObservableObject {
         developerAPIKey = NativeDeveloperAPIKeyKeychain.read() ?? ""
         if let providerRaw = UserDefaults.standard.string(forKey: cloudProviderStorageKey),
            let provider = CloudSyncProvider(rawValue: providerRaw) {
-            cloudSyncProvider = provider == .googleDrive ? .none : provider
+            cloudSyncProvider = provider
         } else {
             cloudSyncProvider = .none
         }
@@ -2147,6 +2156,7 @@ private final class NativeVaultViewModel: ObservableObject {
         if let message, !message.isEmpty {
             planSheetMessage = message
         }
+        refreshPurchaseReadiness()
         showPlanSheet = true
     }
 
@@ -2522,8 +2532,8 @@ private final class NativeVaultViewModel: ObservableObject {
         }
 
         guard hasCloudTools else {
-            alertState = AlertState(message: "Import from iCloud is available on the CLOUD monthly plan.")
-            presentPlanSheet(focusingOn: .cloud, message: "Encrypted iCloud backup import requires the CLOUD monthly plan.")
+            alertState = AlertState(message: "Import from iCloud/Google Drive is available on the CLOUD monthly plan.")
+            presentPlanSheet(focusingOn: .cloud, message: "Google Drive and iCloud import require the CLOUD monthly plan.")
             return
         }
 
@@ -2669,10 +2679,9 @@ private final class NativeVaultViewModel: ObservableObject {
     }
 
     func setCloudProvider(_ provider: CloudSyncProvider) {
-        let normalizedProvider = provider == .googleDrive ? CloudSyncProvider.none : provider
-        cloudSyncProvider = normalizedProvider
-        UserDefaults.standard.set(normalizedProvider.rawValue, forKey: cloudProviderStorageKey)
-        if normalizedProvider == .none {
+        cloudSyncProvider = provider
+        UserDefaults.standard.set(provider.rawValue, forKey: cloudProviderStorageKey)
+        if provider == .none {
             cloudSyncStatus = "Cloud sync disabled"
             stopCloudSyncTimer()
         } else if isUnlocked {
@@ -2795,7 +2804,7 @@ private final class NativeVaultViewModel: ObservableObject {
 #if canImport(RevenueCat)
         guard runtimeConfig != nil else {
             purchaseReadinessLooksGood = false
-            purchaseReadinessStatus = "Store purchases are not available right now."
+            purchaseReadinessStatus = "RevenueCat runtime config is missing."
             return
         }
 
@@ -2810,29 +2819,41 @@ private final class NativeVaultViewModel: ObservableObject {
             do {
                 try await configureRevenueCat()
                 let offerings = try await fetchRevenueCatOfferings()
-                guard let current = currentRevenueCatOffering(from: offerings) else {
-                    purchaseReadinessStatus = "Store purchases are not available right now."
+                let allPackages = offerings.all.values.flatMap(\.availablePackages)
+                guard !allPackages.isEmpty else {
+                    purchaseReadinessStatus = "No App Store subscription products were loaded. Check RevenueCat offerings and App Store Connect subscriptions."
                     return
                 }
 
-                let availableIDs = current.availablePackages.map { $0.storeProduct.productIdentifier.lowercased() }
+                let availableIDs = Set(allPackages.map { $0.storeProduct.productIdentifier.lowercased() })
                 let hasPro = availableIDs.contains(Self.proStoreProductID.lowercased())
                 let hasCloud = availableIDs.contains(Self.cloudStoreProductID.lowercased())
 
                 purchaseReadinessLooksGood = hasPro && hasCloud
                 if purchaseReadinessLooksGood {
                     purchaseReadinessStatus = "App Store subscriptions are available."
+                } else if !hasPro && !hasCloud {
+                    purchaseReadinessStatus = "PRO and CLOUD subscriptions were not loaded from App Store Connect."
+                } else if !hasPro {
+                    purchaseReadinessStatus = "PRO subscription was not loaded from App Store Connect."
                 } else {
-                    purchaseReadinessStatus = "Store purchases are not available right now."
+                    purchaseReadinessStatus = "CLOUD subscription was not loaded from App Store Connect."
+                }
+
+                if currentRevenueCatOffering(from: offerings) == nil {
+                    purchaseReadinessLooksGood = false
+                    purchaseReadinessStatus = "RevenueCat current/default offering is missing. Configure the default offering before testing purchases."
+                } else {
+                    planSheetMessage = nil
                 }
             } catch {
                 purchaseReadinessLooksGood = false
-                purchaseReadinessStatus = "Store purchases are not available right now."
+                purchaseReadinessStatus = "App Store subscriptions could not be loaded: \(error.localizedDescription)"
             }
         }
 #else
         purchaseReadinessLooksGood = false
-        purchaseReadinessStatus = "Store purchases are not available right now."
+        purchaseReadinessStatus = "RevenueCat is unavailable in this build."
 #endif
     }
 
@@ -2914,7 +2935,7 @@ private final class NativeVaultViewModel: ObservableObject {
             || normalized.contains("configuration")
             || normalized.contains("product")
         {
-            return "\(tier.title) purchase is temporarily unavailable. Try again later or use Restore Purchases."
+            return "\(tier.title) purchase is temporarily unavailable. \(purchaseReadinessStatus)"
         }
 
         return "Purchase failed: \(message)"
@@ -3707,18 +3728,20 @@ private final class NativeVaultViewModel: ObservableObject {
     }
 
     private func packageForTier(_ tier: PremiumTier, from offerings: Offerings) -> Package? {
-        guard let current = currentRevenueCatOffering(from: offerings) else { return nil }
+        let allPackages = offerings.all.values.flatMap(\.availablePackages)
 
-        let candidates = current.availablePackages
         if tier == .pro,
-           let exactMatch = candidates.first(where: { $0.storeProduct.productIdentifier.caseInsensitiveCompare(Self.proStoreProductID) == .orderedSame }) {
+           let exactMatch = allPackages.first(where: { $0.storeProduct.productIdentifier.caseInsensitiveCompare(Self.proStoreProductID) == .orderedSame }) {
             return exactMatch
         }
 
         if tier == .cloud,
-           let exactMatch = candidates.first(where: { $0.storeProduct.productIdentifier.caseInsensitiveCompare(Self.cloudStoreProductID) == .orderedSame }) {
+           let exactMatch = allPackages.first(where: { $0.storeProduct.productIdentifier.caseInsensitiveCompare(Self.cloudStoreProductID) == .orderedSame }) {
             return exactMatch
         }
+
+        guard let current = currentRevenueCatOffering(from: offerings) else { return nil }
+        let candidates = current.availablePackages
 
         if tier == .cloud {
             return candidates.first(where: { $0.storeProduct.productIdentifier.lowercased().contains("cloud") || $0.identifier.lowercased().contains("cloud") })
@@ -4149,6 +4172,7 @@ private struct NativeVaultRootView: View {
         }) {
             NativePlansView(viewModel: viewModel)
         }
+        .preferredColorScheme(.light)
     }
 }
 
@@ -4267,6 +4291,15 @@ private struct NativePlansView: View {
                     }
                     .padding(.vertical, 8)
                 }
+
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: viewModel.purchaseReadinessLooksGood ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .foregroundColor(viewModel.purchaseReadinessLooksGood ? .green : .orange)
+                    Text(viewModel.purchaseReadinessStatus)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.vertical, 6)
 
                 if let message = viewModel.planSheetMessage {
                     Text(message)
@@ -4530,11 +4563,46 @@ private struct NativeUnlockView: View {
                 .foregroundColor(Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
                 .cornerRadius(12)
 
-                Text("PassGen works fully on-device with local vault storage, Face ID unlock, and App Store plan upgrades.")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(Color.white.opacity(0.84))
-                    .multilineTextAlignment(.center)
-                    .padding(.top, 6)
+                VStack(spacing: 10) {
+                    Text("Optional account sign-in")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(Color.white.opacity(0.92))
+                    HStack(spacing: 14) {
+                        NativeAppleIconButton(disabled: viewModel.authBusy) { result in
+                            switch result {
+                            case .success(let authorization):
+                                if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
+                                    viewModel.connectAppleAccount(credential: credential)
+                                } else {
+                                    viewModel.alertState = AlertState(message: "Apple sign-in failed: missing Apple ID credential.")
+                                }
+                            case .failure(let error):
+                                viewModel.alertState = AlertState(message: "Apple sign-in failed: \(error.localizedDescription)")
+                            }
+                        }
+
+                        NativeGoogleIconButton(action: {
+                            viewModel.connectGoogleAccount()
+                        }, disabled: viewModel.authBusy)
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    if viewModel.authBusy {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                                .tint(.white)
+                            Text("Signing in...")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(Color.white.opacity(0.92))
+                        }
+                    }
+
+                    Text("Vault works without sign-in. Sign in for plan and cloud sync features.")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(Color.white.opacity(0.84))
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.top, 4)
             }
             .padding(18)
             .background(Color.white.opacity(0.2))
@@ -4826,17 +4894,146 @@ private struct NativeSettingsTabView: View {
                     }
                 }
 
-                Section("Backup") {
-                    Text("Back up your encrypted vault locally or sync through iCloud on the CLOUD plan.")
+                Section("Authentication") {
+                    if let runtimeConfigIssue = viewModel.runtimeConfigIssue, !runtimeConfigIssue.isEmpty {
+                        Text(runtimeConfigIssue)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.red)
+                    }
+
+                    HStack {
+                        Text("Connected Account")
+                        Spacer()
+                        Text(viewModel.authProviderLabel)
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.secondary)
+                    }
+
+                    if !viewModel.authEmail.isEmpty {
+                        Text(viewModel.authEmail)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
+                    HStack(spacing: 14) {
+                        NativeAppleIconButton(disabled: viewModel.authBusy) { result in
+                            switch result {
+                            case .success(let authorization):
+                                if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
+                                    viewModel.connectAppleAccount(credential: credential)
+                                } else {
+                                    viewModel.alertState = AlertState(message: "Apple sign-in failed: missing Apple ID credential.")
+                                }
+                            case .failure(let error):
+                                viewModel.alertState = AlertState(message: "Apple sign-in failed: \(error.localizedDescription)")
+                            }
+                        }
+
+                        NativeGoogleIconButton(action: {
+                            viewModel.connectGoogleAccount()
+                        }, disabled: viewModel.authBusy)
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    if viewModel.authBusy {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Signing in...")
+                                .font(.system(size: 13, weight: .medium))
+                        }
+                    }
+
+                    if viewModel.authProviderLabel != "Not Connected" {
+                        Button("Disconnect Account", role: .destructive) {
+                            viewModel.disconnectAccount()
+                        }
+
+                        Button("Delete Account", role: .destructive) {
+                            viewModel.showDeleteAccountPrompt = true
+                        }
+
+                        Text("Delete Account permanently removes your PassGen cloud account and linked cloud data.")
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Section("Developer API") {
+                    if viewModel.isPaidTier {
+                        Picker("Target", selection: $viewModel.selectedDeveloperTarget) {
+                            ForEach(viewModel.developerTargets, id: \.self) { target in
+                                Text(target).tag(target)
+                            }
+                        }
+
+                        Text("Active keys: \(viewModel.activeDeveloperAPIKeyCount)/3")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+
+                        if viewModel.developerAPIKey.isEmpty {
+                            Button("Generate API Key") {
+                                viewModel.generateDeveloperAPIKey()
+                            }
+                            .disabled(viewModel.activeDeveloperAPIKeyCount >= 3)
+                        } else {
+                            Text(viewModel.developerAPIKey)
+                                .font(.system(.footnote, design: .monospaced))
+                                .textSelection(.enabled)
+
+                            Button("Copy API Key") {
+                                viewModel.copyToClipboard(viewModel.developerAPIKey, label: "API key")
+                            }
+
+                            Button("Copy \(viewModel.selectedDeveloperTarget) Snippet") {
+                                viewModel.copyToClipboard(viewModel.developerAPISnippet, label: "API snippet")
+                            }
+                        }
+
+                        if !viewModel.apiKeySummaries.isEmpty {
+                            ForEach(viewModel.apiKeySummaries) { key in
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(key.keyPrefix)
+                                            .font(.system(.footnote, design: .monospaced))
+                                        Text(key.label)
+                                            .font(.system(size: 11, weight: .regular))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                    Text(key.isRevoked ? "Revoked" : "Active")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundColor(key.isRevoked ? .red : .green)
+                                    if !key.isRevoked {
+                                        Button("Revoke", role: .destructive) {
+                                            viewModel.revokeDeveloperAPIKey(keyID: key.id)
+                                        }
+                                        .font(.system(size: 12, weight: .semibold))
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        Text("Developer API key generation is available on PRO and CLOUD monthly plans.")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.secondary)
+
+                        Button("Upgrade to PRO or CLOUD") {
+                            viewModel.presentPlanSheet(focusingOn: .pro, message: "Developer API keys require a paid plan. PRO or CLOUD will unlock this feature.")
+                        }
+                    }
+                }
+
+                Section("Cloud Backup") {
+                    Text("CLOUD plan supports backup import from iCloud Drive / Google Drive and backup export through Files.")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.secondary)
 
                     Picker("Provider", selection: Binding(
-                        get: { viewModel.cloudSyncProvider == .googleDrive ? .none : viewModel.cloudSyncProvider },
-                        set: { viewModel.setCloudProvider($0 == .googleDrive ? .none : $0) }
+                        get: { viewModel.cloudSyncProvider },
+                        set: { viewModel.setCloudProvider($0) }
                     )) {
-                        Text("None").tag(CloudSyncProvider.none)
-                        Text("iCloud Drive").tag(CloudSyncProvider.icloud)
+                        ForEach(CloudSyncProvider.allCases, id: \.self) { provider in
+                            Text(provider.title).tag(provider)
+                        }
                     }
                     .disabled(!viewModel.hasCloudTools)
 
@@ -4864,12 +5061,12 @@ private struct NativeSettingsTabView: View {
                     }
                     .disabled(!viewModel.isPaidTier)
 
-                    Button("Import from iCloud Files") {
+                    Button("Import from iCloud / Google Drive") {
                         if viewModel.hasCloudTools {
                             showImportPicker = true
                         } else {
-                            viewModel.alertState = AlertState(message: "Upgrade to CLOUD to import backups from iCloud.")
-                            viewModel.presentPlanSheet(focusingOn: .cloud, message: "Encrypted iCloud backup import requires the CLOUD monthly plan.")
+                            viewModel.alertState = AlertState(message: "Upgrade to CLOUD to import backups from iCloud/Google Drive.")
+                            viewModel.presentPlanSheet(focusingOn: .cloud, message: "Google Drive and iCloud import require the CLOUD monthly plan.")
                         }
                     }
 
