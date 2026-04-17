@@ -671,6 +671,11 @@ private enum NativeTab: Hashable {
     case settings
 }
 
+private enum NativeGeneratorMode: String, CaseIterable, Hashable {
+    case passwords = "Passwords"
+    case authenticator = "Authenticator"
+}
+
 private enum PremiumTier: String, CaseIterable, Hashable {
     case free
     case pro
@@ -1894,6 +1899,8 @@ private final class NativeVaultViewModel: ObservableObject {
     @Published var includeLowercase = true
     @Published var includeNumbers = true
     @Published var includeSymbols = true
+    @Published var generatorMode: NativeGeneratorMode = .passwords
+    @Published var authenticatorSearchText = ""
 
     private let hintStorageKey = "passgen-password-hint"
     private let onboardingStorageKey = "passgen-onboarding-complete-native"
@@ -2064,6 +2071,33 @@ private final class NativeVaultViewModel: ObservableObject {
                 .lowercased()
                 .contains(query)
         }
+    }
+
+    var authenticatorEntries: [VaultEntry] {
+        let query = authenticatorSearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        let eligible = entries.filter { entry in
+            let secret = (entry.totpSecret ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return !secret.isEmpty
+        }
+
+        guard !query.isEmpty else {
+            return eligible.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        }
+
+        return eligible.filter { entry in
+            [
+                entry.name,
+                entry.username,
+                entry.totpIssuer ?? "",
+                entry.totpAccountName ?? "",
+                normalizedDomain(from: entry.url) ?? ""
+            ]
+            .joined(separator: " ")
+            .lowercased()
+            .contains(query)
+        }
+        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     func bootstrap() {
@@ -4015,6 +4049,40 @@ private final class NativeVaultViewModel: ObservableObject {
         startCreateEntry(seedPassword: generatedPassword)
     }
 
+    func openAuthenticatorSetup() {
+        activeTab = .vault
+        startCreateEntry()
+    }
+
+    func editAuthenticatorEntry(_ entry: VaultEntry) {
+        activeTab = .vault
+        startEditEntry(entry)
+    }
+
+    func authenticatorCode(for entry: VaultEntry, at date: Date) -> String? {
+        let secret = (entry.totpSecret ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !secret.isEmpty else { return nil }
+        return TOTPGenerator.currentCode(
+            secret: secret,
+            digits: max(6, min(8, entry.totpDigits ?? 6)),
+            period: max(15, min(60, entry.totpPeriod ?? 30)),
+            algorithm: (entry.totpAlgorithm ?? "SHA1").uppercased(),
+            date: date
+        )
+    }
+
+    func authenticatorRemainingSeconds(for entry: VaultEntry, at date: Date) -> Int {
+        TOTPGenerator.remainingSeconds(period: max(15, min(60, entry.totpPeriod ?? 30)), date: date)
+    }
+
+    func copyAuthenticatorCode(for entry: VaultEntry, at date: Date) {
+        guard let code = authenticatorCode(for: entry, at: date) else {
+            alertState = AlertState(message: "Unable to generate 2FA code.")
+            return
+        }
+        copyToClipboard(code, label: "2FA code")
+    }
+
     func resetAppData() {
         do {
             try store.reset()
@@ -4171,6 +4239,9 @@ private struct NativeVaultRootView: View {
             viewModel.clearPlanSheetContext()
         }) {
             NativePlansView(viewModel: viewModel)
+        }
+        .sheet(isPresented: $viewModel.showEditorSheet) {
+            NativeEntryEditorView(viewModel: viewModel)
         }
         .preferredColorScheme(.light)
     }
@@ -4723,6 +4794,13 @@ private struct NativeVaultTabView: View {
                                     .foregroundColor(.secondary)
                                     .lineLimit(1)
                             }
+
+                            if let secret = entry.totpSecret?.trimmingCharacters(in: .whitespacesAndNewlines),
+                               !secret.isEmpty {
+                                Text("2FA enabled")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
+                            }
                         }
                     }
                     .padding(.vertical, 4)
@@ -4767,51 +4845,170 @@ private struct NativeVaultTabView: View {
             }
         }
         .navigationViewStyle(.stack)
-        .sheet(isPresented: $viewModel.showEditorSheet) {
-            NativeEntryEditorView(viewModel: viewModel)
-        }
     }
 }
 
 private struct NativeGeneratorTabView: View {
     @ObservedObject var viewModel: NativeVaultViewModel
+    @State private var now = Date()
+
+    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         NavigationView {
-            Form {
-                Section("Generated Password") {
-                    Text(viewModel.generatedPassword.isEmpty ? "Tap regenerate." : viewModel.generatedPassword)
-                        .font(.system(.body, design: .monospaced))
-                        .textSelection(.enabled)
+            Group {
+                if viewModel.generatorMode == .passwords {
+                    Form {
+                        Section {
+                            Picker("Mode", selection: $viewModel.generatorMode) {
+                                ForEach(NativeGeneratorMode.allCases, id: \.self) { mode in
+                                    Text(mode.rawValue).tag(mode)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                        }
 
-                    Button("Regenerate") {
-                        viewModel.regeneratePassword()
-                    }
+                        Section("Generated Password") {
+                            Text(viewModel.generatedPassword.isEmpty ? "Tap regenerate." : viewModel.generatedPassword)
+                                .font(.system(.body, design: .monospaced))
+                                .textSelection(.enabled)
 
-                    Button("Copy Password") {
-                        if viewModel.generatedPassword.isEmpty {
-                            viewModel.alertState = AlertState(message: "Generate a password first.")
-                        } else {
-                            viewModel.copyToClipboard(viewModel.generatedPassword, label: "Password")
+                            Button("Regenerate") {
+                                viewModel.regeneratePassword()
+                            }
+
+                            Button("Copy Password") {
+                                if viewModel.generatedPassword.isEmpty {
+                                    viewModel.alertState = AlertState(message: "Generate a password first.")
+                                } else {
+                                    viewModel.copyToClipboard(viewModel.generatedPassword, label: "Password")
+                                }
+                            }
+
+                            Button("Use In New Vault Entry") {
+                                viewModel.useGeneratedPasswordForNewEntry()
+                            }
+                        }
+
+                        Section("Options") {
+                            Stepper("Length: \(viewModel.length)", value: $viewModel.length, in: 8 ... 64)
+                            Toggle("Uppercase", isOn: $viewModel.includeUppercase)
+                            Toggle("Lowercase", isOn: $viewModel.includeLowercase)
+                            Toggle("Numbers", isOn: $viewModel.includeNumbers)
+                            Toggle("Symbols", isOn: $viewModel.includeSymbols)
                         }
                     }
+                } else {
+                    List {
+                        Section {
+                            Picker("Mode", selection: $viewModel.generatorMode) {
+                                ForEach(NativeGeneratorMode.allCases, id: \.self) { mode in
+                                    Text(mode.rawValue).tag(mode)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                        }
 
-                    Button("Use In New Vault Entry") {
-                        viewModel.useGeneratedPasswordForNewEntry()
+                        Section {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Authenticator")
+                                    .font(.system(size: 17, weight: .bold))
+                                Text("Use saved 2FA secrets like a built-in authenticator app.")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Button("Add 2FA to a Vault Entry") {
+                                viewModel.openAuthenticatorSetup()
+                            }
+                        }
+
+                        if viewModel.authenticatorEntries.isEmpty {
+                            Section {
+                                Text("No authenticator entries yet. Add a 2FA secret or scan an otpauth QR code inside a vault entry.")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(.secondary)
+                            }
+                        } else {
+                            Section("Codes") {
+                                ForEach(viewModel.authenticatorEntries) { entry in
+                                    let code = viewModel.authenticatorCode(for: entry, at: now) ?? "------"
+                                    let seconds = viewModel.authenticatorRemainingSeconds(for: entry, at: now)
+                                    let issuer = (entry.totpIssuer ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                                    let account = (entry.totpAccountName ?? entry.username).trimmingCharacters(in: .whitespacesAndNewlines)
+                                    let period = max(15, min(60, entry.totpPeriod ?? 30))
+
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        HStack(spacing: 12) {
+                                            WebsiteBrandIconView(
+                                                domain: entry.websiteDomain ?? normalizedDomain(from: entry.url),
+                                                title: entry.name,
+                                                size: 38
+                                            )
+
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(!issuer.isEmpty ? issuer : entry.name)
+                                                    .font(.system(size: 16, weight: .bold))
+                                                if !account.isEmpty {
+                                                    Text(account)
+                                                        .font(.system(size: 13, weight: .medium))
+                                                        .foregroundColor(.secondary)
+                                                }
+                                            }
+
+                                            Spacer()
+
+                                            Text("\(seconds)s")
+                                                .font(.system(size: 12, weight: .bold))
+                                                .foregroundColor(.secondary)
+                                        }
+
+                                        HStack {
+                                            Text(code)
+                                                .font(.system(size: 28, weight: .bold, design: .monospaced))
+                                            Spacer()
+                                            Button("Copy") {
+                                                viewModel.copyAuthenticatorCode(for: entry, at: now)
+                                            }
+                                            .font(.system(size: 13, weight: .bold))
+                                        }
+
+                                        ProgressView(value: Double(max(0, seconds)), total: Double(period))
+                                            .tint(Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
+                                    }
+                                    .padding(.vertical, 6)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        viewModel.editAuthenticatorEntry(entry)
+                                    }
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                        Button {
+                                            viewModel.copyAuthenticatorCode(for: entry, at: now)
+                                        } label: {
+                                            Label("Copy Code", systemImage: "doc.on.doc")
+                                        }
+                                        .tint(Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
+
+                                        Button {
+                                            viewModel.editAuthenticatorEntry(entry)
+                                        } label: {
+                                            Label("Edit", systemImage: "pencil")
+                                        }
+                                        .tint(.gray)
+                                    }
+                                }
+                            }
+                        }
                     }
-                }
-
-                Section("Options") {
-                    Stepper("Length: \(viewModel.length)", value: $viewModel.length, in: 8 ... 64)
-                    Toggle("Uppercase", isOn: $viewModel.includeUppercase)
-                    Toggle("Lowercase", isOn: $viewModel.includeLowercase)
-                    Toggle("Numbers", isOn: $viewModel.includeNumbers)
-                    Toggle("Symbols", isOn: $viewModel.includeSymbols)
+                    .searchable(text: $viewModel.authenticatorSearchText, prompt: "Search Authenticator")
                 }
             }
             .navigationTitle("Generator")
         }
         .navigationViewStyle(.stack)
+        .onReceive(timer) { value in
+            now = value
+        }
         .onChange(of: viewModel.length) { _ in
             viewModel.regeneratePassword()
         }
