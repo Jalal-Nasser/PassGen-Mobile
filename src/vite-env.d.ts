@@ -28,6 +28,7 @@ declare interface Window {
 		storageSupabaseDownload: (config: any, versionId?: string) => Promise<string>
 		storageSupabaseListVersions: (config: any) => Promise<any[]>
 		storageSupabaseRestoreVersion: (config: any, versionId: string) => Promise<string>
+		vaultDelete: (entryId: string) => Promise<void>
 		devSecretGenerate: () => Promise<{ base64Url: string; hex: string }>
 		devSecretSelectProject: () => Promise<{ success: boolean; folder?: string; hasEnv?: boolean; envPath?: string }>
 		devSecretInjectEnv: (payload: { folder: string; key: string; value: string }) => Promise<{ success: boolean; envPath?: string; updated?: boolean; created?: boolean }>

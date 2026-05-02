@@ -56,6 +56,7 @@ const desktopBridge = {
   vaultList: () => ipcRenderer.invoke('vault:list'),
   vaultAdd: (entry: any) => ipcRenderer.invoke('vault:add', entry),
   vaultUpdate: (entry: any) => ipcRenderer.invoke('vault:update', entry),
+  vaultDelete: (entryId: string) => ipcRenderer.invoke('vault:delete', entryId),
   vaultExportEncrypted: () => ipcRenderer.invoke('vault:exportEncrypted'),
   vaultImportEncrypted: (data: string) => ipcRenderer.invoke('vault:importEncrypted', data),
   vaultImportLegacy: (entries: Array<{ filename: string; data: string }>, masterPassword: string) => ipcRenderer.invoke('vault:importLegacy', entries, masterPassword),
@@ -120,6 +121,7 @@ declare global {
       vaultList: () => Promise<any[]>
       vaultAdd: (entry: any) => Promise<void>
       vaultUpdate: (entry: any) => Promise<void>
+      vaultDelete: (entryId: string) => Promise<void>
       vaultExportEncrypted: () => Promise<string>
       vaultImportEncrypted: (data: string) => Promise<void>
       vaultImportLegacy: (entries: Array<{ filename: string; data: string }>, masterPassword: string) => Promise<{ imported: number; skipped: number }>

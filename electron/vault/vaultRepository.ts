@@ -234,6 +234,17 @@ export class VaultRepository {
     await this.persistVault()
   }
 
+  async deleteEntry(entryId: string): Promise<void> {
+    await this.ensureUnlocked()
+    const items = this.vaultPayload!.vaultItems
+    const index = items.findIndex(item => item.id === entryId)
+    if (index === -1) {
+      throw new Error('Entry not found')
+    }
+    items.splice(index, 1)
+    await this.persistVault()
+  }
+
   async exportEncrypted(): Promise<string> {
     await this.ensureUnlocked()
     const vaultPath = this.getVaultPath()

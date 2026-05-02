@@ -1662,6 +1662,13 @@ ipcMain.handle('vault:update', async (_event, entry) => {
   return vaultRepository.updateEntry(entry)
 })
 
+ipcMain.handle('vault:delete', async (_event, entryId: string) => {
+  if (!entryId) {
+    throw new Error('Missing entry id')
+  }
+  return vaultRepository.deleteEntry(entryId)
+})
+
 ipcMain.handle('vault:exportEncrypted', async () => {
   return vaultRepository.exportEncrypted()
 })

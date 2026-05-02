@@ -200,6 +200,14 @@ export const capacitorNativeBridgeAPI = {
     if (idx !== -1) inMemoryVault.vaultItems[idx] = entry
     await persistVault()
   },
+
+  vaultDelete: async (entryId: string) => {
+    if (!inMemoryVault) throw new Error('Locked')
+    const idx = inMemoryVault.vaultItems.findIndex((i: any) => i.id === entryId)
+    if (idx === -1) throw new Error('Entry not found')
+    inMemoryVault.vaultItems.splice(idx, 1)
+    await persistVault()
+  },
   
   vaultExportEncrypted: async () => await getVaultFile(),
   vaultImportEncrypted: async (data: string) => await saveVaultFile(data),

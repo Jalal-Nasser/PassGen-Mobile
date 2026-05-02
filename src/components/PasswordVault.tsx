@@ -154,6 +154,7 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
           const active = status?.activeProviderId as ProviderId | undefined
           if (active && active !== 'local' && active !== 'dropbox') {
             setCloudImportProvider(active)
+            loadCloudVersions(active)
             return
           }
 
@@ -450,6 +451,11 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
     }
   }
 
+  const escapeCSVValue = (value: unknown) => {
+    const text = String(value ?? '')
+    return `"${text.replace(/"/g, '""')}"`
+  }
+
   const exportToCSV = () => {
     if (entries.length === 0) {
       alert(t('No passwords to export'))
@@ -457,7 +463,15 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
     }
     const csvHeader = 'Name,Username,Password,URL,Notes,Created At,Updated At\n'
     const csvRows = entries.map(entry =>
-      `"${entry.name}","${entry.username || ''}","${entry.password}","${entry.url || ''}","${entry.notes || ''}","${entry.createdAt}","${entry.updatedAt}"`
+      [
+        entry.name,
+        entry.username,
+        entry.password,
+        entry.url,
+        entry.notes,
+        entry.createdAt,
+        entry.updatedAt
+      ].map(escapeCSVValue).join(',')
     ).join('\n')
     const csvContent = csvHeader + csvRows
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
@@ -577,6 +591,38 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
       notes: entry.notes || '',
     })
     setShowAddForm(true)
+  }
+
+  const handleDeleteEntry = async (entry: PasswordEntry) => {
+    if (!confirm(t('Delete "{{name}}" from your vault? This cannot be undone.', { name: entry.name }))) return
+
+    try {
+      setLoading(true)
+      await storageManager.deletePasswordEntry(entry.id)
+      setExpandedEntries(prev => {
+        const next = new Set(prev)
+        next.delete(entry.id)
+        return next
+      })
+      setCompromisedEntries(prev => {
+        const next = { ...prev }
+        delete next[entry.id]
+        return next
+      })
+      if (editingEntry?.id === entry.id) {
+        setIsEditing(false)
+        setEditingEntry(null)
+        setNewEntry({ name: '', username: '', password: '', url: '', notes: '' })
+        setShowAddForm(false)
+      }
+      await loadEntries()
+      alert(t('Password deleted successfully.'))
+    } catch (error) {
+      console.error('Failed to delete entry:', error)
+      alert(t('Failed to delete password: {{message}}', { message: (error as Error).message }))
+    } finally {
+      setLoading(false)
+    }
   }
 
   const filteredEntries = entries.filter(entry =>
@@ -783,6 +829,12 @@ function PasswordVault({ storageManager, onGenerateNew }: PasswordVaultProps) {
                 <button onClick={(e) => { e.stopPropagation(); handleEditEntry(entry); }} className="btn-icon" title={t('Edit')}>
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                     <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z" />
+                  </svg>
+                </button>
+                <button onClick={(e) => { e.stopPropagation(); handleDeleteEntry(entry); }} className="btn-icon btn-icon-danger" title={t('Delete')} disabled={loading}>
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z" />
+                    <path fillRule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1 0-2H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3h11V2h-11v1z" />
                   </svg>
                 </button>
               </div>

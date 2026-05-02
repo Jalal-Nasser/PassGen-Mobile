@@ -72,6 +72,12 @@ export class StorageManager {
     await api.vaultUpdate(entry)
   }
 
+  async deletePasswordEntry(entryId: string): Promise<void> {
+    const api = (window as any).nativeBridgeAPI
+    if (!api?.vaultDelete) throw new Error('Vault backend is not available')
+    await api.vaultDelete(entryId)
+  }
+
   async getAllPasswordEntries(): Promise<PasswordEntry[]> {
     const api = (window as any).nativeBridgeAPI
     if (!api?.vaultList) throw new Error('Vault backend is not available')
