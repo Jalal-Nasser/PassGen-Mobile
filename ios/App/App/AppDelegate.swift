@@ -3719,10 +3719,14 @@ private struct NativeGeneratorTabView: View {
     }
 }
 
+private enum NativeSettingsImportKind: Equatable {
+    case localCSV
+    case backup
+}
+
 private struct NativeSettingsTabView: View {
     @ObservedObject var viewModel: NativeVaultViewModel
-    @State private var showLocalCSVImportPicker = false
-    @State private var showImportPicker = false
+    @State private var importKind: NativeSettingsImportKind?
     @State private var showExportPicker = false
     @State private var exportDocument: VaultBackupDocument?
     @State private var exportFilename = "passgen-vault-backup"
@@ -3738,6 +3742,24 @@ private struct NativeSettingsTabView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         return "passgen-vault-backup-\(formatter.string(from: Date()))"
+    }
+
+    private var importPickerPresented: Binding<Bool> {
+        Binding(
+            get: { importKind != nil },
+            set: { isPresented in
+                if !isPresented {
+                    importKind = nil
+                }
+            }
+        )
+    }
+
+    private var importAllowedContentTypes: [UTType] {
+        if importKind == .localCSV {
+            return [.commaSeparatedText, .plainText]
+        }
+        return [.passgenBackup, .json, .commaSeparatedText, .plainText]
     }
 
     var body: some View {
@@ -3883,7 +3905,7 @@ private struct NativeSettingsTabView: View {
                         .foregroundColor(.secondary)
 
                     Button("Import Apple Passwords CSV") {
-                        showLocalCSVImportPicker = true
+                        importKind = .localCSV
                     }
                     .disabled(!viewModel.isUnlocked)
                 }
@@ -3928,7 +3950,7 @@ private struct NativeSettingsTabView: View {
 
                     Button("Import from iCloud / Google Drive") {
                         if viewModel.hasCloudTools {
-                            showImportPicker = true
+                            importKind = .backup
                         } else {
                             viewModel.alertState = AlertState(message: "Upgrade to CLOUD to import backups from iCloud/Google Drive.")
                             viewModel.showPlanSheet = true
@@ -3969,9 +3991,12 @@ private struct NativeSettingsTabView: View {
             }
             .navigationTitle("Settings")
             .fileImporter(
-                isPresented: $showLocalCSVImportPicker,
-                allowedContentTypes: [.commaSeparatedText, .plainText]
+                isPresented: importPickerPresented,
+                allowedContentTypes: importAllowedContentTypes
             ) { result in
+                let selectedImportKind = importKind
+                importKind = nil
+
                 switch result {
                 case .success(let url):
                     let accessGranted = url.startAccessingSecurityScopedResource()
@@ -3983,32 +4008,14 @@ private struct NativeSettingsTabView: View {
 
                     do {
                         let data = try Data(contentsOf: url)
-                        viewModel.importLocalPasswordCSVData(data)
-                    } catch {
-                        viewModel.alertState = AlertState(message: "Unable to read selected CSV file.")
-                    }
-                case .failure(let error):
-                    viewModel.alertState = AlertState(message: "Import cancelled: \(error.localizedDescription)")
-                }
-            }
-            .fileImporter(
-                isPresented: $showImportPicker,
-                allowedContentTypes: [.passgenBackup, .json, .commaSeparatedText, .plainText]
-            ) { result in
-                switch result {
-                case .success(let url):
-                    let accessGranted = url.startAccessingSecurityScopedResource()
-                    defer {
-                        if accessGranted {
-                            url.stopAccessingSecurityScopedResource()
+                        if selectedImportKind == .localCSV {
+                            viewModel.importLocalPasswordCSVData(data)
+                        } else {
+                            viewModel.importBackupData(data)
                         }
-                    }
-
-                    do {
-                        let data = try Data(contentsOf: url)
-                        viewModel.importBackupData(data)
                     } catch {
-                        viewModel.alertState = AlertState(message: "Unable to read selected backup file.")
+                        let label = selectedImportKind == .localCSV ? "CSV file" : "backup file"
+                        viewModel.alertState = AlertState(message: "Unable to read selected \(label).")
                     }
                 case .failure(let error):
                     viewModel.alertState = AlertState(message: "Import cancelled: \(error.localizedDescription)")
