@@ -2559,8 +2559,8 @@ private final class NativeVaultViewModel: ObservableObject {
             _ = try store.importEntries(imported)
             refreshEntries()
             if hitFreeLimit {
-                alertState = AlertState(message: "Imported \(imported.count) of \(parsedCount) passwords from CSV due to the free plan limit.")
-                presentPlanSheet(focusingOn: .pro, message: "Upgrade to PRO or CLOUD to import and store unlimited passwords.")
+                alertState = AlertState(message: "Imported \(imported.count) of \(parsedCount) passwords from CSV due to the free plan limit. Upgrade to PRO or CLOUD to import and store unlimited passwords.")
+                showPlanSheet = true
             } else {
                 alertState = AlertState(message: "Imported \(imported.count) passwords from CSV.")
             }
