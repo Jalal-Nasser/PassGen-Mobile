@@ -1,4 +1,5 @@
 require_relative '../../node_modules/@capacitor/ios/scripts/pods_helpers'
+require 'fileutils'
 
 platform :ios, '15.0'
 use_frameworks!
@@ -24,8 +25,39 @@ target 'App' do
   # Add your Pods here
 end
 
+def add_empty_privacy_manifest(installer, target_name)
+  target = installer.pods_project.targets.find { |pod_target| pod_target.name == target_name }
+  return unless target
+
+  support_dir = File.join(installer.sandbox.root.to_s, 'Target Support Files', target_name)
+  FileUtils.mkdir_p(support_dir)
+
+  manifest_path = File.join(support_dir, 'PrivacyInfo.xcprivacy')
+  File.write(manifest_path, <<~PLIST)
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    <plist version="1.0">
+    <dict>
+      <key>NSPrivacyTracking</key>
+      <false/>
+      <key>NSPrivacyCollectedDataTypes</key>
+      <array/>
+      <key>NSPrivacyAccessedAPITypes</key>
+      <array/>
+    </dict>
+    </plist>
+  PLIST
+
+  file_ref = installer.pods_project.files.find { |file| file.path == manifest_path } ||
+    installer.pods_project.new_file(manifest_path)
+  target.resources_build_phase.add_file_reference(file_ref, true) unless target.resources_build_phase.files_references.include?(file_ref)
+end
+
 post_install do |installer|
   assertDeploymentTarget(installer)
+  ['GoogleSignIn', 'GTMAppAuth', 'GTMSessionFetcher'].each do |target_name|
+    add_empty_privacy_manifest(installer, target_name)
+  end
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|
       config.build_settings['EXPANDED_CODE_SIGN_IDENTITY'] = ""
