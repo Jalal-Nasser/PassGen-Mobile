@@ -19,14 +19,20 @@ export default function UpgradeModal({ open, onClose }: UpgradeModalProps) {
   const { t } = useI18n()
   const [installId, setInstallId] = useState<string>('')
   const [offerings, setOfferings] = useState<any>(null)
+  const [offeringsLoaded, setOfferingsLoaded] = useState(false)
   const isNative = Capacitor.isNativePlatform()
 
   useEffect(() => {
     if (open) {
       setInstallId(store.getInstallId())
       if (isNative) {
+        setOfferings(null)
+        setOfferingsLoaded(false)
         getSubscriptionOfferings().then((offs) => {
           if (offs) setOfferings(offs)
+          setOfferingsLoaded(true)
+        }).catch(() => {
+          setOfferingsLoaded(true)
         })
       }
     }
@@ -149,7 +155,12 @@ export default function UpgradeModal({ open, onClose }: UpgradeModalProps) {
           </div>
 
           <div className="activation-card" style={{ marginTop: '20px' }}>
-            {!offerings && <p style={{ textAlign: 'center' }}>{t('Loading plans...')}</p>}
+            {!offeringsLoaded && <p style={{ textAlign: 'center' }}>{t('Loading plans...')}</p>}
+            {offeringsLoaded && !offerings && (
+              <p style={{ textAlign: 'center' }}>
+                {t('App Store plans are unavailable. Check the RevenueCat iOS API key, default offering, and App Store Connect product IDs.')}
+              </p>
+            )}
             {offerings && offerings.availablePackages.map((pkg: any) => (
               <div key={pkg.identifier} className="method-option" onClick={() => handlePurchase(pkg)} style={{ marginBottom: '10px' }}>
                 <div style={{ flex: 1 }}>

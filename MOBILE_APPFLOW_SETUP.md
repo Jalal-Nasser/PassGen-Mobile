@@ -51,3 +51,15 @@ To ensure the native mobile app correctly unlocks Premium features, the RevenueC
    - Create two packages inside this offering: `pro_package` (containing the Pro product) and `cloud_package` (containing the Cloud product).
 
 *Note: The iOS App-Specific API Key (`appl_...`) generated from RevenueCat is injected during the cloud build via the `IOS_REVENUECAT_API_KEY` Appflow variable.*
+
+For App Store builds, PassGen uses Apple in-app purchases through RevenueCat. Do not route iOS digital subscription purchases to an external payment page; the native plan sheet resolves the RevenueCat offering and opens the App Store purchase flow for the selected product.
+
+## Free Local Import
+
+Free users can import the CSV exported from Apple Passwords locally from the iOS app:
+
+- Open PassGen Vault > Settings > Local Import.
+- Tap `Import Apple Passwords CSV`.
+- Select the exported `.csv` file from Files.
+
+The free plan still enforces the local 4-password vault limit. Extra rows are left out and the user is prompted to upgrade.

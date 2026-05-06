@@ -41,27 +41,21 @@ private struct MobileRuntimeConfig {
 
     static func load() throws -> MobileRuntimeConfig {
         let bundle = Bundle.main
-        let requiredKeys = [
-            "PassGenSupabaseURL",
-            "PassGenSupabaseAnonKey",
-            "PassGenRevenueCatAPIKey",
-            "PassGenGoogleIOSClientID",
-            "PassGenGoogleReversedClientID",
-            "PassGenGoogleServerClientID"
+        let values: [String: String] = [
+            "PassGenSupabaseURL": configuredString(for: "PassGenSupabaseURL", from: bundle),
+            "PassGenSupabaseAnonKey": configuredString(for: "PassGenSupabaseAnonKey", from: bundle),
+            "PassGenRevenueCatAPIKey": configuredString(for: "PassGenRevenueCatAPIKey", from: bundle),
+            "PassGenGoogleIOSClientID": configuredString(for: "PassGenGoogleIOSClientID", from: bundle),
+            "PassGenGoogleReversedClientID": configuredString(for: "PassGenGoogleReversedClientID", from: bundle),
+            "PassGenGoogleServerClientID": configuredString(for: "PassGenGoogleServerClientID", from: bundle)
         ]
 
-        var values: [String: String] = [:]
         var missing: [String] = []
-
-        for key in requiredKeys {
-            let value = (bundle.object(forInfoDictionaryKey: key) as? String)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let unresolvedVariable = value.hasPrefix("$(") && value.hasSuffix(")")
-            if value.isEmpty || unresolvedVariable || value.contains("REPLACE_ME") {
-                missing.append(key)
-            } else {
-                values[key] = value
-            }
+        if values["PassGenSupabaseURL", default: ""].isEmpty {
+            missing.append("PassGenSupabaseURL")
+        }
+        if values["PassGenRevenueCatAPIKey", default: ""].isEmpty {
+            missing.append("PassGenRevenueCatAPIKey")
         }
 
         if !missing.isEmpty {
@@ -88,6 +82,16 @@ private struct MobileRuntimeConfig {
             googleServerClientID: values["PassGenGoogleServerClientID"] ?? "",
             driveAppFolder: driveAppFolder
         )
+    }
+
+    private static func configuredString(for key: String, from bundle: Bundle) -> String {
+        let value = (bundle.object(forInfoDictionaryKey: key) as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let unresolvedVariable = value.hasPrefix("$(") && value.hasSuffix(")")
+        if value.isEmpty || unresolvedVariable || value.contains("REPLACE_ME") {
+            return ""
+        }
+        return value
     }
 }
 
@@ -580,7 +584,8 @@ private enum PremiumTier: String, CaseIterable, Hashable {
             return [
                 "Store up to 4 passwords",
                 "Local encrypted vault",
-                "Basic password generator"
+                "Basic password generator",
+                "Import Apple Passwords CSV locally"
             ]
         case .pro:
             return [
@@ -592,7 +597,7 @@ private enum PremiumTier: String, CaseIterable, Hashable {
             return [
                 "Everything in PRO",
                 "Automatic encrypted iCloud / Google Drive sync",
-                "Import encrypted backup + iCloud Passwords CSV",
+                "Import encrypted backup + cloud restore",
                 "Export encrypted vault backups"
             ]
         }
@@ -1682,6 +1687,10 @@ private final class NativeVaultViewModel: ObservableObject {
             alertState = AlertState(message: runtimeConfigIssue ?? "Mobile runtime config is missing. Add Appflow Native Config values.")
             return
         }
+        guard let runtimeConfig, !runtimeConfig.supabaseAnonKey.isEmpty else {
+            alertState = AlertState(message: "Supabase mobile backend is not configured.")
+            return
+        }
         guard let tokenData = credential.identityToken,
               let identityToken = String(data: tokenData, encoding: .utf8),
               !identityToken.isEmpty else {
@@ -1703,6 +1712,12 @@ private final class NativeVaultViewModel: ObservableObject {
     func connectGoogleAccount(forceFresh: Bool = false, allowRetry: Bool = true) {
         guard let runtimeConfig, let authClient else {
             alertState = AlertState(message: runtimeConfigIssue ?? "Mobile runtime config is missing. Add Appflow Native Config values.")
+            return
+        }
+        guard !runtimeConfig.supabaseAnonKey.isEmpty,
+              !runtimeConfig.googleIOSClientID.isEmpty,
+              !runtimeConfig.googleServerClientID.isEmpty else {
+            alertState = AlertState(message: "Google sign-in is not configured for this iOS build.")
             return
         }
 
@@ -1982,7 +1997,7 @@ private final class NativeVaultViewModel: ObservableObject {
     }
 
     func importBackupData(_ data: Data) {
-        if let csv = String(data: data, encoding: .utf8),
+        if let csv = decodeCSVText(from: data),
            looksLikeCSV(csv) {
             importPasswordsCSV(csv)
             return
@@ -2009,6 +2024,15 @@ private final class NativeVaultViewModel: ObservableObject {
         }
 
         alertState = AlertState(message: "Unsupported backup format.")
+    }
+
+    func importLocalPasswordCSVData(_ data: Data) {
+        guard let csv = decodeCSVText(from: data), looksLikeCSV(csv) else {
+            alertState = AlertState(message: "Choose the CSV file exported from Apple Passwords.")
+            return
+        }
+
+        importPasswordsCSV(csv)
     }
 
     func handleAppWillEnterForeground() {
@@ -2429,8 +2453,13 @@ private final class NativeVaultViewModel: ObservableObject {
     }
 
     private func looksLikeCSV(_ text: String) -> Bool {
-        let firstLine = text.split(whereSeparator: \.isNewline).first?.lowercased() ?? ""
-        return firstLine.contains("username") && firstLine.contains("password") && firstLine.contains(",")
+        guard let header = parseCSVRows(text).first else { return false }
+        let normalized = Set(header.map(normalizedCSVHeader))
+        return normalized.contains("password")
+            && (normalized.contains("username")
+                || normalized.contains("user")
+                || normalized.contains("email")
+                || normalized.contains("account"))
     }
 
     private func importPasswordsCSV(_ csv: String) {
@@ -2445,21 +2474,34 @@ private final class NativeVaultViewModel: ObservableObject {
             return
         }
 
-        let headerIndex = Dictionary(uniqueKeysWithValues: header.enumerated().map { ($0.element.lowercased(), $0.offset) })
+        var headerIndex: [String: Int] = [:]
+        for (offset, value) in header.enumerated() {
+            let normalized = normalizedCSVHeader(value)
+            if !normalized.isEmpty, headerIndex[normalized] == nil {
+                headerIndex[normalized] = offset
+            }
+        }
 
-        func field(_ row: [String], _ key: String) -> String {
-            guard let index = headerIndex[key], index < row.count else { return "" }
-            return row[index].trimmingCharacters(in: .whitespacesAndNewlines)
+        func field(_ row: [String], _ keys: [String]) -> String {
+            for key in keys {
+                let normalized = normalizedCSVHeader(key)
+                guard let index = headerIndex[normalized], index < row.count else { continue }
+                let value = row[index].trimmingCharacters(in: .whitespacesAndNewlines)
+                if !value.isEmpty {
+                    return value
+                }
+            }
+            return ""
         }
 
         var imported: [VaultEntry] = []
         for row in rows.dropFirst() {
-            let title = field(row, "title")
-            let url = field(row, "url")
-            let username = field(row, "username")
-            let password = field(row, "password")
-            let notes = field(row, "notes")
-            let otpauth = field(row, "otpauth")
+            let title = field(row, ["title", "name"])
+            let url = field(row, ["url", "website", "site", "web site", "websites"])
+            let username = field(row, ["username", "user", "login", "email", "account", "account name"])
+            let password = field(row, ["password"])
+            let notes = field(row, ["notes", "note", "comments"])
+            let otpauth = field(row, ["otpauth", "otp auth", "one-time password", "one time password", "verification code", "totp"])
 
             guard !password.isEmpty else { continue }
             let name = title.isEmpty ? (normalizedDomain(from: url) ?? "Imported Account") : title
@@ -2500,6 +2542,8 @@ private final class NativeVaultViewModel: ObservableObject {
             return
         }
 
+        let parsedCount = imported.count
+        var hitFreeLimit = false
         if selectedTier == .free {
             let allowed = max(0, freePlanLimit - entries.count)
             if allowed <= 0 {
@@ -2507,13 +2551,19 @@ private final class NativeVaultViewModel: ObservableObject {
                 showPlanSheet = true
                 return
             }
+            hitFreeLimit = parsedCount > allowed
             imported = Array(imported.prefix(allowed))
         }
 
         do {
             _ = try store.importEntries(imported)
             refreshEntries()
-            alertState = AlertState(message: "Imported \(imported.count) passwords from CSV.")
+            if hitFreeLimit {
+                alertState = AlertState(message: "Imported \(imported.count) of \(parsedCount) passwords from CSV due to the free plan limit.")
+                presentPlanSheet(focusingOn: .pro, message: "Upgrade to PRO or CLOUD to import and store unlimited passwords.")
+            } else {
+                alertState = AlertState(message: "Imported \(imported.count) passwords from CSV.")
+            }
             triggerAutoSync(reason: "csv-import")
         } catch {
             alertState = AlertState(message: "CSV import failed.")
@@ -2559,6 +2609,29 @@ private final class NativeVaultViewModel: ObservableObject {
             rows.append(row)
         }
         return rows
+    }
+
+    private func decodeCSVText(from data: Data) -> String? {
+        if let utf8 = String(data: data, encoding: .utf8) {
+            return utf8
+        }
+        if let utf16 = String(data: data, encoding: .utf16) {
+            return utf16
+        }
+        return nil
+    }
+
+    private func normalizedCSVHeader(_ value: String) -> String {
+        var normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        normalized = normalized.replacingOccurrences(of: "\u{feff}", with: "")
+        normalized = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
+        normalized = normalized.lowercased()
+        normalized = normalized.replacingOccurrences(of: "_", with: " ")
+        normalized = normalized.replacingOccurrences(of: "-", with: " ")
+        while normalized.contains("  ") {
+            normalized = normalized.replacingOccurrences(of: "  ", with: " ")
+        }
+        return normalized
     }
 
     private struct GoogleDriveMetadata: Decodable {
@@ -2677,6 +2750,9 @@ private final class NativeVaultViewModel: ObservableObject {
     private func configureRevenueCat() async throws {
         guard let runtimeConfig = runtimeConfig else {
             throw SupabaseAuthError.requestFailed("RevenueCat runtime config is missing.")
+        }
+        guard !runtimeConfig.revenueCatAPIKey.isEmpty else {
+            throw SupabaseAuthError.requestFailed("RevenueCat API key is missing.")
         }
 
         Purchases.logLevel = .debug
@@ -3645,6 +3721,7 @@ private struct NativeGeneratorTabView: View {
 
 private struct NativeSettingsTabView: View {
     @ObservedObject var viewModel: NativeVaultViewModel
+    @State private var showLocalCSVImportPicker = false
     @State private var showImportPicker = false
     @State private var showExportPicker = false
     @State private var exportDocument: VaultBackupDocument?
@@ -3800,8 +3877,19 @@ private struct NativeSettingsTabView: View {
                     }
                 }
 
+                Section("Local Import") {
+                    Text("Import a CSV file exported from Apple Passwords. Free users can import up to the 4-password local vault limit.")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.secondary)
+
+                    Button("Import Apple Passwords CSV") {
+                        showLocalCSVImportPicker = true
+                    }
+                    .disabled(!viewModel.isUnlocked)
+                }
+
                 Section("Cloud Backup") {
-                    Text("CLOUD plan supports backup import from iCloud Drive / Google Drive and backup export through Files.")
+                    Text("CLOUD plan supports encrypted backup import from iCloud Drive / Google Drive and backup export through Files.")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.secondary)
 
@@ -3880,6 +3968,29 @@ private struct NativeSettingsTabView: View {
                 }
             }
             .navigationTitle("Settings")
+            .fileImporter(
+                isPresented: $showLocalCSVImportPicker,
+                allowedContentTypes: [.commaSeparatedText, .plainText]
+            ) { result in
+                switch result {
+                case .success(let url):
+                    let accessGranted = url.startAccessingSecurityScopedResource()
+                    defer {
+                        if accessGranted {
+                            url.stopAccessingSecurityScopedResource()
+                        }
+                    }
+
+                    do {
+                        let data = try Data(contentsOf: url)
+                        viewModel.importLocalPasswordCSVData(data)
+                    } catch {
+                        viewModel.alertState = AlertState(message: "Unable to read selected CSV file.")
+                    }
+                case .failure(let error):
+                    viewModel.alertState = AlertState(message: "Import cancelled: \(error.localizedDescription)")
+                }
+            }
             .fileImporter(
                 isPresented: $showImportPicker,
                 allowedContentTypes: [.passgenBackup, .json, .commaSeparatedText, .plainText]

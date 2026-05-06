@@ -10,33 +10,28 @@ import { PasswordEntry } from "./encryption"
 export function parseImportCSV(csvData: string): PasswordEntry[] {
   if (!csvData) return []
   
-  // Basic split by line, handles some quoted newlines but assumes basic row structure
-  // For highly complex CSVs with many quoted newlines, a library like PapaParse is better,
-  // but this covers 99% of Apple/Chrome password exports.
-  const lines = csvData.trim().split('\n')
-  if (lines.length < 2) return []
+  const rows = parseCSVRows(csvData)
+  if (rows.length < 2) return []
 
   const result: PasswordEntry[] = []
   
   // Parse header
-  const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase().trim())
+  const headers = rows[0].map(normalizeHeader)
   
   // Detect column mapping
-  const titleIdx = headers.findIndex(h => h === 'title' || h === 'name' || h === 'url')
-  const usernameIdx = headers.findIndex(h => h === 'username' || h === 'login' || h === 'email')
+  const titleIdx = findHeaderIndex(headers, ['title', 'name'])
+  const usernameIdx = findHeaderIndex(headers, ['username', 'user', 'login', 'email', 'account', 'account name'])
   const passwordIdx = headers.findIndex(h => h === 'password')
-  const urlIdx = headers.findIndex(h => h === 'url' || h === 'website')
-  const notesIdx = headers.findIndex(h => h === 'notes' || h === 'note')
+  const urlIdx = findHeaderIndex(headers, ['url', 'website', 'site', 'web site', 'websites'])
+  const notesIdx = findHeaderIndex(headers, ['notes', 'note', 'comments'])
   
   if (passwordIdx === -1) {
     throw new Error('CSV file format not recognized. No Password column found.')
   }
 
-  for (let i = 1; i < lines.length; i++) {
-    const rowStr = lines[i].trim()
-    if (!rowStr) continue
-    
-    const row = parseCSVLine(rowStr)
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i]
+    if (row.every(cell => !cell.trim())) continue
     // If the row doesn't have enough columns for the password, skip
     if (row.length <= passwordIdx) continue
 
@@ -63,34 +58,50 @@ export function parseImportCSV(csvData: string): PasswordEntry[] {
   return result
 }
 
-/**
- * Helper to correctly split a single CSV line, respecting double-quoted fields.
- */
-function parseCSVLine(line: string): string[] {
-  const result: string[] = []
+function parseCSVRows(text: string): string[][] {
+  const rows: string[][] = []
+  let row: string[] = []
+  let cell = ''
   let inQuotes = false
-  let currentField = ''
-  
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i]
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i]
     if (char === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        // Escaped quote
-        currentField += '"'
+      if (inQuotes && text[i + 1] === '"') {
+        cell += '"'
         i++
       } else {
-        // Toggle quote state
         inQuotes = !inQuotes
       }
     } else if (char === ',' && !inQuotes) {
-      // End of field
-      result.push(currentField)
-      currentField = ''
+      row.push(cell)
+      cell = ''
+    } else if ((char === '\n' || char === '\r') && !inQuotes) {
+      if (char === '\r' && text[i + 1] === '\n') i++
+      row.push(cell)
+      if (row.some(value => value.trim())) rows.push(row)
+      row = []
+      cell = ''
     } else {
-      currentField += char
+      cell += char
     }
   }
-  
-  result.push(currentField) // Last field
-  return result
+
+  if (cell || row.length) {
+    row.push(cell)
+    if (row.some(value => value.trim())) rows.push(row)
+  }
+
+  return rows
+}
+
+function normalizeHeader(value: string): string {
+  let normalized = value.replace(/^\uFEFF/, '').trim().toLowerCase()
+  normalized = normalized.replace(/[_-]+/g, ' ')
+  return normalized.replace(/\s+/g, ' ')
+}
+
+function findHeaderIndex(headers: string[], names: string[]): number {
+  const normalizedNames = names.map(normalizeHeader)
+  return headers.findIndex(header => normalizedNames.includes(header))
 }

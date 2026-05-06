@@ -13,13 +13,23 @@ export async function setupRevenueCat(userId?: string) {
 
   try {
     if (Capacitor.getPlatform() === 'ios') {
+      const apiKey = import.meta.env.VITE_REVENUECAT_IOS_KEY || ''
+      if (!apiKey || apiKey === 'appl_xxx') {
+        console.warn('RevenueCat iOS API key is missing; skipping Purchases.configure().')
+        return
+      }
       await Purchases.configure({
-        apiKey: import.meta.env.VITE_REVENUECAT_IOS_KEY || 'appl_xxx', // Replace in Dashboard
+        apiKey,
         appUserID: userId,
       })
     } else if (Capacitor.getPlatform() === 'android') {
+      const apiKey = import.meta.env.VITE_REVENUECAT_ANDROID_KEY || ''
+      if (!apiKey || apiKey === 'goog_xxx') {
+        console.warn('RevenueCat Android API key is missing; skipping Purchases.configure().')
+        return
+      }
       await Purchases.configure({
-        apiKey: import.meta.env.VITE_REVENUECAT_ANDROID_KEY || 'goog_xxx', 
+        apiKey,
         appUserID: userId,
       })
     }
