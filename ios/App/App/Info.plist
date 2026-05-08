@@ -41,10 +41,24 @@
 	<string>PassGen uses Face ID to unlock your encrypted vault securely.</string>
 	<key>PassGenSupabaseURL</key>
 	<string>$(IOS_SUPABASE_URL)</string>
+	<key>PassGenViteSupabaseURL</key>
+	<string>$(VITE_SUPABASE_URL)</string>
 	<key>PassGenSupabaseAnonKey</key>
 	<string>$(IOS_SUPABASE_ANON_KEY)</string>
+	<key>PassGenViteSupabaseAnonKey</key>
+	<string>$(VITE_SUPABASE_ANON_KEY)</string>
 	<key>PassGenRevenueCatAPIKey</key>
 	<string>$(IOS_REVENUECAT_API_KEY)</string>
+	<key>PassGenRevenueCatViteIOSKey</key>
+	<string>$(VITE_REVENUECAT_IOS_KEY)</string>
+	<key>PassGenRevenueCatProProductID</key>
+	<string>$(IOS_REVENUECAT_PRO_PRODUCT_ID)</string>
+	<key>PassGenRevenueCatCloudProductID</key>
+	<string>$(IOS_REVENUECAT_CLOUD_PRODUCT_ID)</string>
+	<key>PassGenRevenueCatProPackageID</key>
+	<string>$(IOS_REVENUECAT_PRO_PACKAGE_ID)</string>
+	<key>PassGenRevenueCatCloudPackageID</key>
+	<string>$(IOS_REVENUECAT_CLOUD_PACKAGE_ID)</string>
 	<key>PassGenGoogleIOSClientID</key>
 	<string>$(IOS_GOOGLE_IOS_CLIENT_ID)</string>
 	<key>PassGenGoogleReversedClientID</key>

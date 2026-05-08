@@ -19,6 +19,7 @@ import RevenueCat
 private enum MobileRuntimeConfigError: LocalizedError {
     case missingKeys([String])
     case invalidURL(String)
+    case unsafeURL(String)
 
     var errorDescription: String? {
         switch self {
@@ -26,6 +27,8 @@ private enum MobileRuntimeConfigError: LocalizedError {
             return "Missing iOS runtime config keys: \(keys.joined(separator: ", ")). Add them in Ionic Appflow Native Config."
         case .invalidURL(let value):
             return "Invalid Supabase URL in iOS runtime config: \(value)"
+        case .unsafeURL(let value):
+            return "Unsafe Supabase URL in iOS runtime config: \(value). Use your production https://<project>.supabase.co URL."
         }
     }
 }
@@ -34,6 +37,10 @@ private struct MobileRuntimeConfig {
     let supabaseURL: URL
     let supabaseAnonKey: String
     let revenueCatAPIKey: String
+    let revenueCatProProductID: String
+    let revenueCatCloudProductID: String
+    let revenueCatProPackageID: String
+    let revenueCatCloudPackageID: String
     let googleIOSClientID: String
     let googleReversedClientID: String
     let googleServerClientID: String
@@ -41,13 +48,18 @@ private struct MobileRuntimeConfig {
 
     static func load() throws -> MobileRuntimeConfig {
         let bundle = Bundle.main
+        let bundledValues = bundledRuntimeConfig(from: bundle)
         let values: [String: String] = [
-            "PassGenSupabaseURL": configuredString(for: "PassGenSupabaseURL", from: bundle),
-            "PassGenSupabaseAnonKey": configuredString(for: "PassGenSupabaseAnonKey", from: bundle),
-            "PassGenRevenueCatAPIKey": configuredString(for: "PassGenRevenueCatAPIKey", from: bundle),
-            "PassGenGoogleIOSClientID": configuredString(for: "PassGenGoogleIOSClientID", from: bundle),
-            "PassGenGoogleReversedClientID": configuredString(for: "PassGenGoogleReversedClientID", from: bundle),
-            "PassGenGoogleServerClientID": configuredString(for: "PassGenGoogleServerClientID", from: bundle)
+            "PassGenSupabaseURL": firstConfiguredString(for: ["PassGenSupabaseURL", "PassGenViteSupabaseURL"], from: bundle, fallback: bundledValues, fallbackKeys: ["supabaseURL"]),
+            "PassGenSupabaseAnonKey": firstConfiguredString(for: ["PassGenSupabaseAnonKey", "PassGenViteSupabaseAnonKey"], from: bundle, fallback: bundledValues, fallbackKeys: ["supabaseAnonKey"]),
+            "PassGenRevenueCatAPIKey": firstConfiguredString(for: ["PassGenRevenueCatAPIKey", "PassGenRevenueCatViteIOSKey"], from: bundle, fallback: bundledValues, fallbackKeys: ["revenueCatAPIKey"]),
+            "PassGenRevenueCatProProductID": firstConfiguredString(for: ["PassGenRevenueCatProProductID"], from: bundle, fallback: bundledValues, fallbackKeys: ["revenueCatProProductID"]),
+            "PassGenRevenueCatCloudProductID": firstConfiguredString(for: ["PassGenRevenueCatCloudProductID"], from: bundle, fallback: bundledValues, fallbackKeys: ["revenueCatCloudProductID"]),
+            "PassGenRevenueCatProPackageID": firstConfiguredString(for: ["PassGenRevenueCatProPackageID"], from: bundle, fallback: bundledValues, fallbackKeys: ["revenueCatProPackageID"]),
+            "PassGenRevenueCatCloudPackageID": firstConfiguredString(for: ["PassGenRevenueCatCloudPackageID"], from: bundle, fallback: bundledValues, fallbackKeys: ["revenueCatCloudPackageID"]),
+            "PassGenGoogleIOSClientID": firstConfiguredString(for: ["PassGenGoogleIOSClientID"], from: bundle, fallback: bundledValues, fallbackKeys: ["googleIOSClientID"]),
+            "PassGenGoogleReversedClientID": firstConfiguredString(for: ["PassGenGoogleReversedClientID"], from: bundle, fallback: bundledValues, fallbackKeys: ["googleReversedClientID"]),
+            "PassGenGoogleServerClientID": firstConfiguredString(for: ["PassGenGoogleServerClientID"], from: bundle, fallback: bundledValues, fallbackKeys: ["googleServerClientID"])
         ]
 
         var missing: [String] = []
@@ -65,18 +77,25 @@ private struct MobileRuntimeConfig {
         guard let supabaseURLString = values["PassGenSupabaseURL"],
               let supabaseURL = URL(string: supabaseURLString),
               let scheme = supabaseURL.scheme?.lowercased(),
-              ["https", "http"].contains(scheme),
+              scheme == "https",
               supabaseURL.host != nil else {
             throw MobileRuntimeConfigError.invalidURL(values["PassGenSupabaseURL"] ?? "")
         }
+        try validateProductionURL(supabaseURL, rawValue: supabaseURLString)
 
         let driveAppFolder = ((bundle.object(forInfoDictionaryKey: "PassGenDriveAppFolder") as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? "PassGenVault"
+            .trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty || $0.contains("$(") ? nil : $0 } ??
+            configuredString(for: "driveAppFolder", in: bundledValues).nonEmpty ??
+            "PassGenVault"
 
         return MobileRuntimeConfig(
             supabaseURL: supabaseURL,
             supabaseAnonKey: values["PassGenSupabaseAnonKey"] ?? "",
             revenueCatAPIKey: values["PassGenRevenueCatAPIKey"] ?? "",
+            revenueCatProProductID: values["PassGenRevenueCatProProductID"] ?? "",
+            revenueCatCloudProductID: values["PassGenRevenueCatCloudProductID"] ?? "",
+            revenueCatProPackageID: values["PassGenRevenueCatProPackageID"] ?? "",
+            revenueCatCloudPackageID: values["PassGenRevenueCatCloudPackageID"] ?? "",
             googleIOSClientID: values["PassGenGoogleIOSClientID"] ?? "",
             googleReversedClientID: values["PassGenGoogleReversedClientID"] ?? "",
             googleServerClientID: values["PassGenGoogleServerClientID"] ?? "",
@@ -84,14 +103,88 @@ private struct MobileRuntimeConfig {
         )
     }
 
+    private static func firstConfiguredString(
+        for keys: [String],
+        from bundle: Bundle,
+        fallback: [String: String] = [:],
+        fallbackKeys: [String] = []
+    ) -> String {
+        for key in keys {
+            let value = configuredString(for: key, from: bundle)
+            if !value.isEmpty { return value }
+        }
+        for key in fallbackKeys {
+            let value = configuredString(for: key, in: fallback)
+            if !value.isEmpty { return value }
+        }
+        return ""
+    }
+
     private static func configuredString(for key: String, from bundle: Bundle) -> String {
         let value = (bundle.object(forInfoDictionaryKey: key) as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let unresolvedVariable = value.hasPrefix("$(") && value.hasSuffix(")")
-        if value.isEmpty || unresolvedVariable || value.contains("REPLACE_ME") {
+        let normalized = value.lowercased()
+        if value.isEmpty ||
+            value.contains("$(") ||
+            value.contains("REPLACE_ME") ||
+            value.contains("MISSING_") ||
+            normalized.contains("your-project") ||
+            normalized.contains("localhost") ||
+            normalized.contains("127.0.0.1") ||
+            normalized.contains("[::1]") ||
+            normalized.contains("dummy") {
             return ""
         }
         return value
+    }
+
+    private static func configuredString(for key: String, in values: [String: String]) -> String {
+        let value = values[key]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let normalized = value.lowercased()
+        if value.isEmpty ||
+            value.contains("$(") ||
+            value.contains("REPLACE_ME") ||
+            value.contains("MISSING_") ||
+            normalized.contains("your-project") ||
+            normalized.contains("localhost") ||
+            normalized.contains("127.0.0.1") ||
+            normalized.contains("[::1]") ||
+            normalized.contains("dummy") {
+            return ""
+        }
+        return value
+    }
+
+    private static func bundledRuntimeConfig(from bundle: Bundle) -> [String: String] {
+        let url = bundle.url(forResource: "passgen-runtime", withExtension: "json", subdirectory: "public") ??
+            bundle.url(forResource: "passgen-runtime", withExtension: "json")
+        guard let url,
+              let data = try? Data(contentsOf: url),
+              let raw = try? JSONSerialization.jsonObject(with: data, options: []),
+              let dictionary = raw as? [String: Any] else {
+            return [:]
+        }
+
+        var result: [String: String] = [:]
+        for (key, value) in dictionary {
+            if let stringValue = value as? String {
+                result[key] = stringValue
+            }
+        }
+        return result
+    }
+
+    private static func validateProductionURL(_ url: URL, rawValue: String) throws {
+        let host = url.host?.lowercased() ?? ""
+        if host.isEmpty ||
+            host.contains("$") ||
+            host.contains("localhost") ||
+            host == "127.0.0.1" ||
+            host == "::1" ||
+            host.contains("your-project") ||
+            host.contains("example") {
+            throw MobileRuntimeConfigError.unsafeURL(rawValue)
+        }
     }
 }
 
@@ -323,6 +416,7 @@ private final class SupabaseAuthClient {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(config.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
 
         var payload: [String: Any] = [
             "provider": provider.rawValue,
@@ -345,6 +439,7 @@ private final class SupabaseAuthClient {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(config.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["refresh_token": session.refreshToken], options: [])
 
         return try await sendTokenRequest(request)
@@ -398,7 +493,13 @@ private final class SupabaseAuthClient {
     }
 
     private func sendTokenRequest(_ request: URLRequest) async throws -> SupabaseSession {
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch let error as URLError {
+            throw SupabaseAuthError.requestFailed(networkConfigMessage(for: request, error: error))
+        }
         guard let http = response as? HTTPURLResponse else {
             throw SupabaseAuthError.invalidResponse
         }
@@ -421,7 +522,13 @@ private final class SupabaseAuthClient {
     }
 
     private func sendAuthorizedRequest(_ request: URLRequest) async throws -> Data {
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch let error as URLError {
+            throw SupabaseAuthError.requestFailed(networkConfigMessage(for: request, error: error))
+        }
         guard let http = response as? HTTPURLResponse else {
             throw SupabaseAuthError.invalidResponse
         }
@@ -435,6 +542,14 @@ private final class SupabaseAuthClient {
 
         return data
     }
+
+    private func networkConfigMessage(for request: URLRequest, error: URLError) -> String {
+        let host = request.url?.host ?? "unknown host"
+        if error.code == .cannotFindHost || error.code == .dnsLookupFailed {
+            return "Cannot resolve Supabase host '\(host)'. Check IOS_SUPABASE_URL or VITE_SUPABASE_URL in Appflow Native Config."
+        }
+        return "Network error contacting Supabase host '\(host)': \(error.localizedDescription)"
+    }
 }
 
 private extension URL {
@@ -444,6 +559,12 @@ private extension URL {
         }
         components.queryItems = items
         return components.url ?? self
+    }
+}
+
+private extension String {
+    var nonEmpty: String? {
+        isEmpty ? nil : self
     }
 }
 
@@ -1427,8 +1548,9 @@ private final class NativeVaultViewModel: ObservableObject {
     }
 
     var developerAPISnippet: String {
-        let baseURL = runtimeConfig?.supabaseURL.absoluteString ?? "https://<your-project>.supabase.co"
-        let verifyURL = "\(baseURL)/functions/v1/mobile-api-keys-verify"
+        let verifyURL = runtimeConfig
+            .map { "\($0.supabaseURL.absoluteString)/functions/v1/mobile-api-keys-verify" } ??
+            "<configure Supabase mobile runtime URL first>"
 
         switch selectedDeveloperTarget {
         case "Vercel v0":
@@ -2841,6 +2963,29 @@ private final class NativeVaultViewModel: ObservableObject {
         guard let current = offerings.current else { return nil }
 
         let candidates = current.availablePackages
+        let packageID: String
+        let productID: String
+        switch tier {
+        case .cloud:
+            packageID = runtimeConfig?.revenueCatCloudPackageID ?? ""
+            productID = runtimeConfig?.revenueCatCloudProductID ?? ""
+        case .pro:
+            packageID = runtimeConfig?.revenueCatProPackageID ?? ""
+            productID = runtimeConfig?.revenueCatProProductID ?? ""
+        case .free:
+            return nil
+        }
+
+        if !packageID.isEmpty,
+           let package = candidates.first(where: { $0.identifier.caseInsensitiveCompare(packageID) == .orderedSame }) {
+            return package
+        }
+
+        if !productID.isEmpty,
+           let package = candidates.first(where: { $0.storeProduct.productIdentifier.caseInsensitiveCompare(productID) == .orderedSame }) {
+            return package
+        }
+
         if tier == .cloud {
             return candidates.first(where: { $0.storeProduct.productIdentifier.lowercased().contains("cloud") || $0.identifier.lowercased().contains("cloud") })
         }

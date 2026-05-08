@@ -24,9 +24,27 @@ Appflow can keep using `npm run build`. That script now builds:
 
 1. `dist` for desktop/web.
 2. `dist-ios` for Capacitor iOS.
-3. `validate:ios-web` against `dist-ios`.
+3. `dist-ios/passgen-runtime.json` with public native runtime config from Appflow env.
+4. `validate:ios-web` against `dist-ios`.
 
 `npx cap sync ios` will copy `dist-ios` because `capacitor.config.ts` sets `webDir: 'dist-ios'`.
+
+## Appflow Runtime Config
+
+Set these in Appflow for iOS builds:
+
+- `IOS_SUPABASE_URL` or `VITE_SUPABASE_URL`
+- `IOS_SUPABASE_ANON_KEY` or `VITE_SUPABASE_ANON_KEY`
+- `IOS_REVENUECAT_API_KEY` or `VITE_REVENUECAT_IOS_KEY`
+- `IOS_REVENUECAT_PRO_PRODUCT_ID`
+- `IOS_REVENUECAT_CLOUD_PRODUCT_ID`
+
+Optional if RevenueCat package IDs do not include `pro` / `cloud`:
+
+- `IOS_REVENUECAT_PRO_PACKAGE_ID`
+- `IOS_REVENUECAT_CLOUD_PACKAGE_ID`
+
+The iOS Swift runtime first reads `Info.plist` build settings, then falls back to `public/passgen-runtime.json`.
 
 ## Validation
 
