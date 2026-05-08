@@ -1,0 +1,8 @@
+{
+  "servers": {
+    "supabase": {
+      "type": "http",
+      "url": "https://mcp.supabase.com/mcp?project_ref=fnnwyxadidptaziqvfvy&features=functions%2Cdebugging%2Cdatabase%2Caccount%2Cdocs%2Cdevelopment%2Cbranching%2Cstorage"
+    }
+  }
+}
