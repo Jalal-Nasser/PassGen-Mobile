@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { signInWithGoogle, signInWithApple } from '../services/auth'
-import { Capacitor } from '@capacitor/core'
 import { useI18n } from '../services/i18n'
+import { isIOSRuntime } from '../platform/shared/platform'
 import './AuthModal.css'
 
 interface AuthModalProps {
@@ -13,7 +13,7 @@ interface AuthModalProps {
 export default function AuthModal({ open, onClose, onSuccess }: AuthModalProps) {
     const { t } = useI18n()
     const [loading, setLoading] = useState(false)
-    const isTargetingNativeIOS = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios'
+    const isTargetingNativeIOS = isIOSRuntime()
 
     if (!open) return null
 

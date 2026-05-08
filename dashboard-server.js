@@ -309,7 +309,7 @@ app.post('/api/send-activation', async (req, res) => {
 
 // Serve dashboard
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'dashboard.html'))
+  res.sendFile(path.join(__dirname, 'desktop', 'public', 'dashboard.html'))
 })
 
 app.listen(PORT, () => {

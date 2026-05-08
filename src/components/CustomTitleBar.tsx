@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
-import { Capacitor } from '@capacitor/core'
 import './CustomTitleBar.css'
 import { useI18n } from '../services/i18n'
+import { isIOSRuntime } from '../platform/shared/platform'
 
 interface CustomTitleBarProps {
   title?: string
@@ -154,7 +154,7 @@ export const CustomTitleBar: React.FC<CustomTitleBarProps> = ({ title = 'PassGen
         </div>
       </div>
 
-      {!Capacitor.isNativePlatform() && (
+      {!isIOSRuntime() && (
         <div className="title-bar-right">
           <button className="title-bar-button minimize-btn" onClick={handleMinimize} title={t('Minimize')}>
             <svg width="12" height="12" viewBox="0 0 12 12">

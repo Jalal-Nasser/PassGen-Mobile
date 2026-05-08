@@ -1,38 +1,26 @@
 import { Purchases, LOG_LEVEL } from '@revenuecat/purchases-capacitor'
-import { Capacitor } from '@capacitor/core'
+import { isIOSRuntime } from '../platform/shared/platform'
 
 /**
  * Configure RevenueCat safely. It only makes sense to configure RC 
- * if we're on a native platform (iOS/Android).
+ * for the App Store iOS runtime.
  */
 export async function setupRevenueCat(userId?: string) {
-  if (!Capacitor.isNativePlatform()) return
+  if (!isIOSRuntime()) return
 
   // Log level for debugging
   await Purchases.setLogLevel({ level: LOG_LEVEL.DEBUG })
 
   try {
-    if (Capacitor.getPlatform() === 'ios') {
-      const apiKey = import.meta.env.VITE_REVENUECAT_IOS_KEY || ''
-      if (!apiKey || apiKey === 'appl_xxx') {
-        console.warn('RevenueCat iOS API key is missing; skipping Purchases.configure().')
-        return
-      }
-      await Purchases.configure({
-        apiKey,
-        appUserID: userId,
-      })
-    } else if (Capacitor.getPlatform() === 'android') {
-      const apiKey = import.meta.env.VITE_REVENUECAT_ANDROID_KEY || ''
-      if (!apiKey || apiKey === 'goog_xxx') {
-        console.warn('RevenueCat Android API key is missing; skipping Purchases.configure().')
-        return
-      }
-      await Purchases.configure({
-        apiKey,
-        appUserID: userId,
-      })
+    const apiKey = import.meta.env.VITE_REVENUECAT_IOS_KEY || ''
+    if (!apiKey || apiKey === 'appl_xxx') {
+      console.warn('RevenueCat iOS API key is missing; skipping Purchases.configure().')
+      return
     }
+    await Purchases.configure({
+      apiKey,
+      appUserID: userId,
+    })
   } catch (error) {
     console.error('Failed to configure RevenueCat:', error)
   }
@@ -42,7 +30,7 @@ export async function setupRevenueCat(userId?: string) {
  * Sync Supabase user ID with RevenueCat
  */
 export async function logInToRevenueCat(userId: string) {
-  if (!Capacitor.isNativePlatform()) return
+  if (!isIOSRuntime()) return
   try {
     const { customerInfo } = await Purchases.logIn({ appUserID: userId })
     return customerInfo
@@ -52,7 +40,7 @@ export async function logInToRevenueCat(userId: string) {
 }
 
 export async function logOutFromRevenueCat() {
-  if (!Capacitor.isNativePlatform()) return
+  if (!isIOSRuntime()) return
   try {
     await Purchases.logOut()
   } catch (error) {
@@ -64,7 +52,7 @@ export async function logOutFromRevenueCat() {
  * Get Offerings (Plans) from RevenueCat
  */
 export async function getSubscriptionOfferings() {
-  if (!Capacitor.isNativePlatform()) return null
+  if (!isIOSRuntime()) return null
   try {
     const offerings = await Purchases.getOfferings()
     return offerings.current // The "Default" offering mapped in RC dashboard
@@ -75,7 +63,7 @@ export async function getSubscriptionOfferings() {
 }
 
 export async function purchasePackage(packageToBuy: any) {
-  if (!Capacitor.isNativePlatform()) return null
+  if (!isIOSRuntime()) return null
   try {
     const { customerInfo } = await Purchases.purchasePackage({ aPackage: packageToBuy })
     return customerInfo
@@ -87,7 +75,7 @@ export async function purchasePackage(packageToBuy: any) {
 }
 
 export async function checkPremiumStatus(): Promise<'pro' | 'cloud' | 'free'> {
-  if (!Capacitor.isNativePlatform()) return 'free'
+  if (!isIOSRuntime()) return 'free'
   try {
     const customerInfo = await Purchases.getCustomerInfo()
     if (customerInfo.customerInfo.entitlements.active['cloud']) return 'cloud'

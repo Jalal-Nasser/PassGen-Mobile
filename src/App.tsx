@@ -15,6 +15,7 @@ import { applyRemoteLicense, getPremiumTier } from './services/license'
 import { useI18n } from './services/i18n'
 import SettingsModal from './components/SettingsModal'
 import DeveloperTab from './components/DeveloperTab'
+import { isIOSRuntime } from './platform/shared/platform'
 
 interface PasswordOptions {
   length: number
@@ -80,6 +81,7 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (isIOSRuntime()) return
     const api = (window as any).nativeBridgeAPI
     if (!api?.licenseGetMe) return
     let cancelled = false

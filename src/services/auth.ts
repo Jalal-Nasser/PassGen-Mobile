@@ -1,11 +1,11 @@
 import { supabase } from './supabase'
-import { Capacitor } from '@capacitor/core'
 import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth'
 import { SignInWithApple, SignInWithAppleResponse, SignInWithAppleOptions } from '@capacitor-community/apple-sign-in'
 import { logInToRevenueCat, logOutFromRevenueCat } from './revenuecat'
+import { isIOSRuntime } from '../platform/shared/platform'
 
 export async function initializeAuth() {
-  if (Capacitor.isNativePlatform()) {
+  if (isIOSRuntime()) {
     // Note: Initialize GoogleAuth. The client ID must be configured in capacitor.config.ts or natively
     GoogleAuth.initialize({
       clientId: import.meta.env.VITE_GOOGLE_CLIENT_ID || 'dummy-client-id.apps.googleusercontent.com',
@@ -16,7 +16,7 @@ export async function initializeAuth() {
 }
 
 export async function signInWithGoogle() {
-  if (Capacitor.isNativePlatform()) {
+  if (isIOSRuntime()) {
     try {
       const googleUser = await GoogleAuth.signIn()
       if (googleUser.authentication.idToken) {
@@ -48,7 +48,7 @@ export async function signInWithGoogle() {
 }
 
 export async function signInWithApple() {
-  if (Capacitor.isNativePlatform()) {
+  if (isIOSRuntime()) {
     try {
       const options: SignInWithAppleOptions = {
         clientId: import.meta.env.VITE_APPLE_CLIENT_ID || 'com.mdeploy.passgen',
@@ -91,7 +91,7 @@ export async function signInWithApple() {
 export async function signOut() {
   await logOutFromRevenueCat()
   await supabase.auth.signOut()
-  if (Capacitor.isNativePlatform()) {
+  if (isIOSRuntime()) {
     try {
       await GoogleAuth.signOut()
     } catch (e) {

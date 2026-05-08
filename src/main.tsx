@@ -4,13 +4,13 @@ import App from './App'
 import './index.css'
 import { I18nProvider } from './services/i18n'
 import { setupRevenueCat } from './services/revenuecat'
+import { isIOSRuntime } from './platform/shared/platform'
 
 setupRevenueCat()
 
-import { Capacitor } from '@capacitor/core'
 import { capacitorNativeBridgeAPI, capacitorNativeClipboard } from './mobile/capacitorNativeBridgeAPI'
 
-if (Capacitor.isNativePlatform()) {
+if (isIOSRuntime()) {
   console.log('[Mobile] Injecting Capacitor native bridge...')
     ; (window as any).nativeBridgeAPI = capacitorNativeBridgeAPI
     ; (window as any).nativeBridge = { clipboard: capacitorNativeClipboard }

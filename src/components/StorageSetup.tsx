@@ -7,6 +7,7 @@ import { useI18n } from '../services/i18n'
 import googleIconSvg from '../assets/google-g.svg?raw'
 import supabaseIconSvg from '../assets/supabase.svg?raw'
 import oneDriveIconSvg from '../assets/onedrive.svg?raw'
+import { isIOSRuntime } from '../platform/shared/platform'
 
 const googleIconUrl = `data:image/svg+xml;utf8,${encodeURIComponent(googleIconSvg)}`
 const supabaseIconUrl = `data:image/svg+xml;utf8,${encodeURIComponent(supabaseIconSvg)}`
@@ -23,6 +24,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
   const [step, setStep] = useState<'select' | 'config'>('select')
   const [showInfo, setShowInfo] = useState(true)
   const { t } = useI18n()
+  const isIOS = isIOSRuntime()
 
   const [localFolder, setLocalFolder] = useState('')
   const [localBackupsEnabled, setLocalBackupsEnabled] = useState(true)
@@ -654,8 +656,12 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
                     )}
                   </div>
                   <div className="premium-option">
-                    <div className="premium-title">{t('Become Premium')}</div>
-                    <div className="premium-sub">{t('Request activation after payment to unlock Premium.')}</div>
+                    <div className="premium-title">{isIOS ? t('Upgrade with App Store') : t('Become Premium')}</div>
+                    <div className="premium-sub">
+                      {isIOS
+                        ? t('Use App Store in-app purchase to unlock paid storage features.')
+                        : t('Request activation after payment to unlock Premium.')}
+                    </div>
                     <div className="premium-action-row">
                       <button
                         type="button"
@@ -665,7 +671,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
                           window.dispatchEvent(new Event('open-upgrade'))
                         }}
                       >
-                        {t('Become Premium')}
+                        {isIOS ? t('Upgrade with App Store') : t('Become Premium')}
                       </button>
                     </div>
                   </div>

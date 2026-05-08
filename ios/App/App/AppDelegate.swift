@@ -651,7 +651,6 @@ private let websitePresets: [WebsitePreset] = [
     WebsitePreset(id: "canva", name: "Canva", domain: "canva.com", loginURL: "https://www.canva.com/login", description: "Design and content creation platform.", keywords: ["design", "graphics", "creative"]),
     WebsitePreset(id: "figma", name: "Figma", domain: "figma.com", loginURL: "https://www.figma.com/login", description: "Collaborative design and prototyping.", keywords: ["design", "ui", "ux"]),
     WebsitePreset(id: "adobe", name: "Adobe", domain: "adobe.com", loginURL: "https://account.adobe.com", description: "Creative cloud and Adobe services.", keywords: ["creative", "design", "photoshop"]),
-    WebsitePreset(id: "paypal", name: "PayPal", domain: "paypal.com", loginURL: "https://www.paypal.com/signin", description: "Online payments and transfers.", keywords: ["payments", "finance", "wallet"]),
     WebsitePreset(id: "ebay", name: "eBay", domain: "ebay.com", loginURL: "https://signin.ebay.com", description: "Online auctions and marketplace.", keywords: ["shopping", "marketplace"]),
     WebsitePreset(id: "netflix", name: "Netflix", domain: "netflix.com", loginURL: "https://www.netflix.com/login", description: "Streaming entertainment platform.", keywords: ["streaming", "video"]),
     WebsitePreset(id: "spotify", name: "Spotify", domain: "spotify.com", loginURL: "https://accounts.spotify.com/login", description: "Music and podcast streaming.", keywords: ["music", "audio", "streaming"]),
@@ -673,8 +672,6 @@ private let websitePresets: [WebsitePreset] = [
     WebsitePreset(id: "doordash", name: "DoorDash", domain: "doordash.com", loginURL: "https://www.doordash.com/consumer/login", description: "Food delivery platform.", keywords: ["delivery", "food"]),
     WebsitePreset(id: "uber_eats", name: "Uber Eats", domain: "ubereats.com", loginURL: "https://www.ubereats.com/login", description: "Food delivery by Uber.", keywords: ["delivery", "food"]),
     WebsitePreset(id: "robinhood", name: "Robinhood", domain: "robinhood.com", loginURL: "https://robinhood.com/login", description: "Investing and brokerage platform.", keywords: ["finance", "stocks", "investing"]),
-    WebsitePreset(id: "coinbase", name: "Coinbase", domain: "coinbase.com", loginURL: "https://www.coinbase.com/signin", description: "Cryptocurrency exchange platform.", keywords: ["crypto", "finance", "exchange"]),
-    WebsitePreset(id: "binance", name: "Binance", domain: "binance.com", loginURL: "https://accounts.binance.com", description: "Cryptocurrency exchange.", keywords: ["crypto", "exchange", "finance"]),
     WebsitePreset(id: "chase", name: "Chase", domain: "chase.com", loginURL: "https://secure.chase.com", description: "Banking and credit card accounts.", keywords: ["bank", "finance", "cards"]),
     WebsitePreset(id: "bankofamerica", name: "Bank of America", domain: "bankofamerica.com", loginURL: "https://secure.bankofamerica.com", description: "Online banking and account access.", keywords: ["bank", "finance"]),
     WebsitePreset(id: "wellsfargo", name: "Wells Fargo", domain: "wellsfargo.com", loginURL: "https://connect.secure.wellsfargo.com", description: "Banking and loan services.", keywords: ["bank", "finance"]),
@@ -2190,7 +2187,7 @@ private final class NativeVaultViewModel: ObservableObject {
     private func signInErrorMessage(provider: NativeAuthProvider, error: Error) -> String {
         let message = error.localizedDescription
         if provider == .google && isGoogleNonceMismatch(message: message) {
-            return "Google sign-in token mismatch. In Supabase Dashboard > Authentication > Providers > Google, enable \"Skip nonce checks\", save, then retry."
+            return "Google sign-in token mismatch. In Supabase Authentication > Providers > Google, enable \"Skip nonce checks\", save, then retry."
         }
         return "Sign-in failed: \(message)"
     }

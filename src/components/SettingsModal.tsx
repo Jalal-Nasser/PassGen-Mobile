@@ -5,6 +5,7 @@ import { useI18n } from '../services/i18n'
 import { ConfigStore } from '../services/configStore'
 import type { ProviderId } from '../services/storageTypes'
 import googleIconSvg from '../assets/google-g.svg?raw'
+import { isIOSRuntime } from '../platform/shared/platform'
 
 const googleIconUrl = `data:image/svg+xml;utf8,${encodeURIComponent(googleIconSvg)}`
 
@@ -28,6 +29,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [localBackupsEnabled, setLocalBackupsEnabled] = useState(true)
   const [localKeepLast, setLocalKeepLast] = useState(10)
   const [activeProviderId, setActiveProviderId] = useState<ProviderId>('local')
+  const isIOS = isIOSRuntime()
 
   useEffect(() => {
     if (!open) return
@@ -255,10 +257,14 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
                 </button>
               </div>
               <div className="settings-premium-option">
-                <div className="settings-premium-title">{t('Become Premium')}</div>
-                <div className="settings-premium-sub">{t('Pick a plan on the payment page, then enter your license key.')}</div>
+                <div className="settings-premium-title">{isIOS ? t('Upgrade with App Store') : t('Become Premium')}</div>
+                <div className="settings-premium-sub">
+                  {isIOS
+                    ? t('Use App Store in-app purchase to manage your plan.')
+                    : t('Pick a plan on the payment page, then enter your license key.')}
+                </div>
                 <button className="btn-secondary" onClick={openPremiumUpgrade}>
-                  {t('Pick a Plan')}
+                  {isIOS ? t('Upgrade with App Store') : t('Pick a Plan')}
                 </button>
               </div>
             </div>

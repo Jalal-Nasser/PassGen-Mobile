@@ -1,0 +1,45 @@
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  background: #0f172a;
+  color: #f8fafc;
+}
+
+.ios-fallback {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 14px;
+  text-align: center;
+}
+
+.ios-fallback__mark {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  background: #f8fafc;
+  color: #4f46e5;
+  font-size: 34px;
+  font-weight: 800;
+}
+
+.ios-fallback h1 {
+  margin: 0;
+  font-size: 24px;
+  letter-spacing: 0;
+}
+
+.ios-fallback p {
+  margin: 0;
+  color: #cbd5e1;
+  font-size: 15px;
+}
