@@ -92,10 +92,10 @@ private struct MobileRuntimeConfig {
             supabaseURL: supabaseURL,
             supabaseAnonKey: values["PassGenSupabaseAnonKey"] ?? "",
             revenueCatAPIKey: values["PassGenRevenueCatAPIKey"] ?? "",
-            revenueCatProProductID: values["PassGenRevenueCatProProductID"] ?? "",
-            revenueCatCloudProductID: values["PassGenRevenueCatCloudProductID"] ?? "",
-            revenueCatProPackageID: values["PassGenRevenueCatProPackageID"] ?? "",
-            revenueCatCloudPackageID: values["PassGenRevenueCatCloudPackageID"] ?? "",
+            revenueCatProProductID: (values["PassGenRevenueCatProProductID"] ?? "").nonEmpty ?? "passgen_pro_monthly",
+            revenueCatCloudProductID: (values["PassGenRevenueCatCloudProductID"] ?? "").nonEmpty ?? "passgen_cloud_monthly",
+            revenueCatProPackageID: (values["PassGenRevenueCatProPackageID"] ?? "").nonEmpty ?? "monthly",
+            revenueCatCloudPackageID: (values["PassGenRevenueCatCloudPackageID"] ?? "").nonEmpty ?? "$rc_monthly",
             googleIOSClientID: values["PassGenGoogleIOSClientID"] ?? "",
             googleReversedClientID: values["PassGenGoogleReversedClientID"] ?? "",
             googleServerClientID: values["PassGenGoogleServerClientID"] ?? "",
@@ -1469,6 +1469,8 @@ private final class NativeVaultViewModel: ObservableObject {
     @Published var cloudSyncStatus = "Cloud sync disabled"
     @Published var lastCloudSyncAt: Date?
     @Published var planBusy = false
+    @Published var planStatusMessage = ""
+    @Published var planErrorMessage = ""
     @Published var developerAPIKey = ""
     @Published var apiKeySummaries: [MobileAPIKeySummary] = []
     @Published var selectedDeveloperTarget = "Vercel v0"
@@ -1704,6 +1706,8 @@ private final class NativeVaultViewModel: ObservableObject {
     }
 
     func setTier(_ tier: PremiumTier) {
+        planErrorMessage = ""
+        planStatusMessage = ""
         if tier == .free {
             selectedTier = .free
             UserDefaults.standard.set(PremiumTier.free.rawValue, forKey: planStorageKey)
@@ -2180,8 +2184,12 @@ private final class NativeVaultViewModel: ObservableObject {
 
     func restorePurchases() {
 #if canImport(RevenueCat)
+        planErrorMessage = ""
+        planStatusMessage = "Contacting App Store..."
         guard runtimeConfig != nil else {
-            alertState = AlertState(message: "RevenueCat runtime config is missing.")
+            let message = "RevenueCat runtime config is missing."
+            planErrorMessage = message
+            alertState = AlertState(message: message)
             return
         }
         planBusy = true
@@ -2189,22 +2197,33 @@ private final class NativeVaultViewModel: ObservableObject {
             defer { planBusy = false }
             do {
                 try await configureRevenueCat()
+                planStatusMessage = "Restoring purchases..."
                 let customerInfo = try await restoreRevenueCatPurchases()
                 applyTierFromCustomerInfo(customerInfo)
+                planStatusMessage = "Purchases restored."
                 alertState = AlertState(message: "Purchases restored successfully.")
             } catch {
-                alertState = AlertState(message: "Restore purchases failed: \(error.localizedDescription)")
+                let message = "Restore purchases failed: \(error.localizedDescription)"
+                planErrorMessage = message
+                planStatusMessage = ""
+                alertState = AlertState(message: message)
             }
         }
 #else
-        alertState = AlertState(message: "Purchase restore is unavailable in this build.")
+        let message = "Purchase restore is unavailable in this build."
+        planErrorMessage = message
+        alertState = AlertState(message: message)
 #endif
     }
 
     private func purchaseTier(_ tier: PremiumTier) {
 #if canImport(RevenueCat)
+        planErrorMessage = ""
+        planStatusMessage = "Contacting App Store..."
         guard runtimeConfig != nil else {
-            alertState = AlertState(message: "RevenueCat runtime config is missing.")
+            let message = "RevenueCat runtime config is missing."
+            planErrorMessage = message
+            alertState = AlertState(message: message)
             return
         }
         guard tier != .free else {
@@ -2217,19 +2236,27 @@ private final class NativeVaultViewModel: ObservableObject {
             defer { planBusy = false }
             do {
                 try await configureRevenueCat()
+                planStatusMessage = "Loading App Store plans..."
                 let offerings = try await fetchRevenueCatOfferings()
                 guard let package = packageForTier(tier, from: offerings) else {
-                    throw SupabaseAuthError.requestFailed("No \(tier.title) package found in RevenueCat offerings.")
+                    throw SupabaseAuthError.requestFailed(revenueCatPackageDebugMessage(for: tier, offerings: offerings))
                 }
+                planStatusMessage = "Opening App Store purchase..."
                 let customerInfo = try await purchaseRevenueCatPackage(package)
                 applyTierFromCustomerInfo(customerInfo)
+                planStatusMessage = "\(tier.title) plan activated."
                 alertState = AlertState(message: "\(tier.title) plan activated.")
             } catch {
-                alertState = AlertState(message: "Purchase failed: \(error.localizedDescription)")
+                let message = "Purchase failed: \(error.localizedDescription)"
+                planErrorMessage = message
+                planStatusMessage = ""
+                alertState = AlertState(message: message)
             }
         }
 #else
-        alertState = AlertState(message: "In-app purchases are unavailable in this build.")
+        let message = "In-app purchases are unavailable in this build."
+        planErrorMessage = message
+        alertState = AlertState(message: message)
 #endif
     }
 
@@ -2997,6 +3024,32 @@ private final class NativeVaultViewModel: ObservableObject {
         return nil
     }
 
+    private func revenueCatPackageDebugMessage(for tier: PremiumTier, offerings: Offerings) -> String {
+        let expectedProductID: String
+        let expectedPackageID: String
+        switch tier {
+        case .cloud:
+            expectedProductID = runtimeConfig?.revenueCatCloudProductID ?? "passgen_cloud_monthly"
+            expectedPackageID = runtimeConfig?.revenueCatCloudPackageID ?? "$rc_monthly"
+        case .pro:
+            expectedProductID = runtimeConfig?.revenueCatProProductID ?? "passgen_pro_monthly"
+            expectedPackageID = runtimeConfig?.revenueCatProPackageID ?? "monthly"
+        case .free:
+            expectedProductID = ""
+            expectedPackageID = ""
+        }
+
+        guard let current = offerings.current else {
+            return "RevenueCat has no current offering. Set a current offering in RevenueCat and include \(expectedProductID)."
+        }
+
+        let available = current.availablePackages
+            .map { "\($0.identifier) -> \($0.storeProduct.productIdentifier)" }
+            .joined(separator: ", ")
+        let listedPackages = available.isEmpty ? "none" : available
+        return "No \(tier.title) package found. Expected product \(expectedProductID) or package \(expectedPackageID). Current offering packages: \(listedPackages)."
+    }
+
     private func applyTierFromCustomerInfo(_ customerInfo: CustomerInfo) {
         if customerInfo.entitlements.active["cloud"] != nil {
             selectedTier = .cloud
@@ -3213,6 +3266,8 @@ private final class NativeVaultViewModel: ObservableObject {
             showWebsitePicker = false
             websiteQuery = ""
             showPlanSheet = false
+            planStatusMessage = ""
+            planErrorMessage = ""
             activeTab = .vault
             selectedTier = .free
             passkeyUnlockEnabled = false
@@ -3415,10 +3470,23 @@ private struct NativePlansView: View {
                 if viewModel.planBusy {
                     HStack(spacing: 10) {
                         ProgressView()
-                        Text("Contacting App Store...")
+                        Text(viewModel.planStatusMessage.isEmpty ? "Contacting App Store..." : viewModel.planStatusMessage)
                             .font(.system(size: 14, weight: .medium))
                     }
                     .padding(.vertical, 8)
+                }
+
+                if !viewModel.planErrorMessage.isEmpty {
+                    Text(viewModel.planErrorMessage)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.red)
+                        .textSelection(.enabled)
+                        .padding(.vertical, 4)
+                } else if !viewModel.planStatusMessage.isEmpty {
+                    Text(viewModel.planStatusMessage)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .padding(.vertical, 4)
                 }
 
                 Button("Restore Purchases") {
