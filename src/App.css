@@ -305,7 +305,13 @@
   border: 2px solid #e0e0e0;
   border-radius: 12px;
   background: white;
+  color: #1e293b;
+  caret-color: #667eea;
   transition: all 0.2s;
+}
+
+.auth-input::placeholder {
+  color: #8a94a6;
 }
 
 .auth-input.hint-input {
@@ -426,6 +432,8 @@ h1 {
   border: 2px solid #e0e0e0;
   border-radius: 6px;
   background: #f9f9f9;
+  color: #1e293b;
+  caret-color: #667eea;
 }
 
 .password-input:focus {

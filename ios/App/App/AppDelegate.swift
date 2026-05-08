@@ -3599,6 +3599,8 @@ private struct NativeUnlockView: View {
                         }
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled(true)
+                        .foregroundColor(Color(red: 30 / 255, green: 41 / 255, blue: 59 / 255))
+                        .tint(Color(red: 102 / 255, green: 126 / 255, blue: 234 / 255))
 
                         Button(viewModel.showMasterPassword ? "Hide" : "Show") {
                             viewModel.showMasterPassword.toggle()
@@ -3620,6 +3622,8 @@ private struct NativeUnlockView: View {
                         TextField("Password hint (optional)", text: $viewModel.passwordHintInput)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled(true)
+                            .foregroundColor(Color(red: 30 / 255, green: 41 / 255, blue: 59 / 255))
+                            .tint(Color(red: 102 / 255, green: 126 / 255, blue: 234 / 255))
                             .padding(12)
                             .background(Color.white)
                             .cornerRadius(12)
