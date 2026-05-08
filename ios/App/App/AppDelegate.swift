@@ -4974,6 +4974,14 @@ private struct NativeLogoView: View {
     }
 
     private func loadLogoImage() -> UIImage? {
+        if let appLogo = UIImage(named: "AppLogo") {
+            return appLogo
+        }
+
+        if let appIcon = UIImage(named: "AppIcon") {
+            return appIcon
+        }
+
         if let direct = UIImage(named: "icon") {
             return direct
         }
