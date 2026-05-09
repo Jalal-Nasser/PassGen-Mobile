@@ -35,9 +35,6 @@ port = 54326
 enabled = true
 file_size_limit = "50MiB"
 
-[functions."activation-request"]
-verify_jwt = false
-
 [functions."mobile-api-keys-create"]
 verify_jwt = true
 

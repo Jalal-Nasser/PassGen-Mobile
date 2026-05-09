@@ -1,9 +1,7 @@
 import { lazy, Suspense } from 'react'
 import type { UpgradeModalProps } from '../platform/shared/upgradeTypes'
 
-const UpgradeModalImpl = __PASSGEN_TARGET__ === 'ios'
-  ? lazy(() => import('../platform/ios/IOSUpgradeModal'))
-  : lazy(() => import('../platform/desktop/DesktopUpgradeModal'))
+const UpgradeModalImpl = lazy(() => import('../platform/ios/IOSUpgradeModal'))
 
 export default function UpgradeModal(props: UpgradeModalProps) {
   return (

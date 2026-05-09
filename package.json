@@ -1,30 +1,15 @@
 {
   "name": "passgen",
   "version": "1.0.37",
-  "description": "A Vault secure password generator desktop application",
+  "description": "PassGen Secrets Vault iOS mobile application",
   "engines": {
     "node": ">=20.0.0"
   },
-  "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
-    "build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 tsc && cross-env NODE_OPTIONS=--max-old-space-size=4096 vite build && cross-env NODE_OPTIONS=--max-old-space-size=4096 vite build --mode ios && node scripts/prepare-ios-web.js && npm run validate:ios-web",
+    "build": "npm run build:ios:web",
     "build:ios:web": "cross-env NODE_OPTIONS=--max-old-space-size=4096 vite build --mode ios && node scripts/prepare-ios-web.js && npm run validate:ios-web",
     "preview": "vite preview",
-    "electron:dev": "tsc && vite --port 5173 --strictPort",
-    "electron:build": "node scripts/write-build-info.js && tsc && vite build && node scripts/sync-icons.js && electron-builder",
-    "prebuild:msix": "node scripts/write-build-info.js && tsc && vite build && node scripts/sync-icons.js && node scripts/prepare-store-icons.js",
-    "build:msix": "cross-env STORE_BUILD=1 electron-builder --win appx",
-    "test:vault": "tsc && electron . --vault-self-test",
-    "test:oauth": "tsc && electron . --oauth-ipc-test",
-    "test:auth": "tsc && electron . --auth-test",
-    "test:nowpayments": "node scripts/test-nowpayments-ipn.js",
-    "gen:activation": "node scripts/generate-activation.js",
-    "gen:license-keys": "node scripts/generate-license-keys.js",
-    "dashboard": "node dashboard-server.js",
-    "discord-bot": "node discord-bot.js",
-    "release": "node scripts/create-release.js",
-    "build:web": "tsc && vite build",
     "validate:ios-web": "node scripts/validate-ios-artifact.js dist-ios",
     "validate:ios-artifact": "node scripts/validate-ios-artifact.js dist-ios ios/App/App/public",
     "postinstall": "patch-package"
@@ -32,8 +17,8 @@
   "keywords": [
     "password",
     "generator",
-    "electron",
-    "desktop"
+    "ios",
+    "capacitor"
   ],
   "author": "",
   "license": "MIT",
@@ -45,22 +30,13 @@
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
     "@vitejs/plugin-react": "^4.2.1",
-    "concurrently": "^8.2.2",
     "cross-env": "^7.0.3",
-    "electron": "^28.0.0",
-    "electron-builder": "^24.9.1",
     "patch-package": "^8.0.1",
-    "png-to-ico": "^2.1.0",
-    "sharp": "^0.33.2",
     "supabase": "^2.98.2",
     "typescript": "^5.3.3",
-    "vite": "^5.0.8",
-    "vite-plugin-electron": "^0.28.0",
-    "vite-plugin-electron-renderer": "^0.14.5",
-    "wait-on": "^7.2.0"
+    "vite": "^5.0.8"
   },
   "dependencies": {
-    "@auth/core": "^0.34.3",
     "@aws-sdk/client-s3": "^3.925.0",
     "@capacitor-community/apple-sign-in": "^7.1.0",
     "@capacitor/clipboard": "^8.0.1",
@@ -69,93 +45,11 @@
     "@capacitor/ios": "^8.1.0",
     "@capacitor/preferences": "^8.0.1",
     "@codetrix-studio/capacitor-google-auth": "^3.4.0-rc.4",
-    "@peculiar/x509": "^1.14.2",
     "@revenuecat/purchases-capacitor": "^12.2.0",
     "@supabase/supabase-js": "^2.89.0",
-    "axios": "^1.13.2",
     "crypto-js": "^4.2.0",
-    "discord.js": "^14.25.1",
-    "dotenv": "^17.2.3",
-    "electron-store": "^11.0.2",
-    "express": "^5.2.1",
     "googleapis": "^164.1.0",
-    "keypair": "^1.0.4",
-    "nodemailer": "^7.0.10",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "resend": "^3.5.0",
-    "tweetnacl": "^1.0.3"
-  },
-  "optionalDependencies": {
-    "keytar": "^7.9.0"
-  },
-  "build": {
-    "appId": "com.passgen.app",
-    "productName": "PassGen Secrets Vault",
-    "appxManifestCreated": "scripts/appx-manifest.js",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "dist-electron/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": "resources/.env",
-        "to": ".env"
-      },
-      {
-        "from": "resources/build-info.json",
-        "to": "build-info.json"
-      }
-    ],
-    "win": {
-      "icon": "build/icon.ico",
-      "publisherName": "CN=92CE8CEC-534B-45DF-B9FE-D346FD430CC0",
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "appx",
-          "arch": [
-            "x64"
-          ]
-        }
-      ]
-    },
-    "appx": {
-      "identityName": "JalalNasser.PassGenSecretsVault",
-      "displayName": "PassGen Secrets Vault",
-      "publisher": "CN=92CE8CEC-534B-45DF-B9FE-D346FD430CC0",
-      "publisherDisplayName": "Jalal Nasser",
-      "backgroundColor": "transparent"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": "always",
-      "createStartMenuShortcut": true,
-      "shortcutName": "PassGen Secrets Vault",
-      "deleteAppDataOnUninstall": false,
-      "perMachine": false,
-      "license": "LICENSE.txt"
-    },
-    "mac": {
-      "icon": "public/icon.png",
-      "target": [
-        "dmg"
-      ]
-    },
-    "linux": {
-      "icon": "public/icon.png",
-      "target": [
-        "AppImage"
-      ]
-    }
+    "react-dom": "^18.2.0"
   }
 }

@@ -212,7 +212,7 @@ export const capacitorNativeBridgeAPI = {
   vaultExportEncrypted: async () => await getVaultFile(),
   vaultImportEncrypted: async (data: string) => await saveVaultFile(data),
   
-  // Dummy methods for unsupported desktop features
+  // No-op methods for unsupported native bridge features.
   vaultRepair: async () => ({ total: 0, kept: 0, migrated: 0, removed: 0 }),
   storageProviderStatus: async () => ({ activeProviderId: 'local' }),
   storageConfigure: async () => {},

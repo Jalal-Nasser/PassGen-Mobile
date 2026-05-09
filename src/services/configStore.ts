@@ -1,6 +1,5 @@
 // Simple localStorage-based config store
 // No Node.js dependencies - safe for renderer process
-import CryptoJS from 'crypto-js'
 import type { ProviderId, S3CompatibleConfig, SupabaseStorageConfig } from './storageTypes'
 
 export interface StorageConfig {
@@ -38,42 +37,6 @@ export class ConfigStore {
     localStorage.setItem('passgen-user-email', email)
   }
 
-  private getSellerSecret(): string {
-    // Desktop-only activation secret. iOS/Appflow must never receive this value.
-    // Resolution order:
-    //   1. Runtime window override, set by Electron main before renderer loads.
-    //   2. VITE_SELLER_SECRET, defined only for non-iOS Vite builds.
-    //   3. Hard failure. There is no hardcoded fallback.
-    const secret =
-      (window as any)?.PASSGEN_SELLER_SECRET ||
-      (import.meta as any)?.env?.VITE_SELLER_SECRET ||
-      ''
-
-    if (!secret) {
-      throw new Error(
-        'Desktop activation secret is missing. Set VITE_SELLER_SECRET for desktop builds only.'
-      )
-    }
-
-    return secret
-  }
-
-  // Dev-only helper to inspect the effective desktop secret without logging it.
-  getSellerSecretForDebug(): string {
-    return this.getSellerSecret()
-  }
-
-  computeActivationCode(email?: string): string {
-    const installId = this.getInstallId()
-    const secret = this.getSellerSecret()
-    const data = `${installId}|${(email || this.getUserEmail() || '').trim().toLowerCase()}|${secret}`
-    const digest = CryptoJS.SHA256(data).toString()
-    return digest.substring(0, 10).toUpperCase()
-  }
-
-  verifyActivationCode(code: string, email?: string): boolean {
-    return this.computeActivationCode(email) === code.trim().toUpperCase()
-  }
   isPremium(): boolean {
     const active = localStorage.getItem('passgen-premium') === 'true'
     if (!active) return false

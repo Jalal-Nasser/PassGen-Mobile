@@ -1,6 +1,6 @@
 # Supabase Edge Functions Setup
 
-This directory contains Supabase Edge Functions for PassGen activation and mobile production APIs.
+This directory contains Supabase Edge Functions for PassGen mobile production APIs.
 
 ## Setup
 
@@ -21,10 +21,9 @@ supabase link --project-ref msapggfdkgugctycrbqi
 
 ## Deploy Edge Functions
 
-To deploy the activation-request function:
+To deploy the mobile functions:
 
 ```bash
-supabase functions deploy activation-request
 supabase functions deploy mobile-api-keys-create
 supabase functions deploy mobile-api-keys-list
 supabase functions deploy mobile-api-keys-revoke
@@ -102,12 +101,12 @@ To test the Edge Function locally:
 
 ```bash
 supabase start
-supabase functions serve activation-request
+supabase functions serve mobile-api-keys-verify
 ```
 
 Then test with:
 ```bash
-curl -X POST http://localhost:54321/functions/v1/activation-request \
-  -H "Content-Type: application/json" \
-  -d '{"install_id":"test-123","user_email":"test@example.com"}'
+curl -X POST http://localhost:54321/functions/v1/mobile-api-keys-verify \
+  -H "Authorization: Bearer pg_live_XXXX" \
+  -H "Content-Type: application/json"
 ```

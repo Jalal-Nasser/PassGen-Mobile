@@ -5,7 +5,7 @@ declare module '*?raw' {
 	export default content
 }
 
-declare const __PASSGEN_TARGET__: 'desktop' | 'ios'
+declare const __PASSGEN_TARGET__: 'ios'
 
 interface ClipboardAPI {
 	writeText: (text: string) => void

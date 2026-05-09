@@ -8,28 +8,6 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 export const supabase = createClient(
-  supabaseUrl || 'https://msapggfdkgugctycrbqi.supabase.co',
+  supabaseUrl || 'https://example.invalid',
   supabaseKey || 'MISSING_SUPABASE_ANON_KEY'
 )
-
-export interface ActivationRequest {
-  id: string
-  install_id: string
-  user_email: string
-  payment_method: 'paypal' | 'crypto'
-  payment_amount: number
-  payment_currency: string
-  status: 'pending' | 'approved' | 'rejected' | 'activated'
-  activation_code?: string
-  notes?: string
-  created_at: string
-  updated_at: string
-  activated_at?: string
-}
-
-export interface DashboardStats {
-  total_requests: number
-  pending_requests: number
-  activated_requests: number
-  total_revenue: number
-}

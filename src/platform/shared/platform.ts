@@ -1,9 +1,9 @@
 import { Capacitor } from '@capacitor/core'
 
-export type PassGenBuildTarget = 'desktop' | 'ios'
+export type PassGenBuildTarget = 'ios'
 
 export function getBuildTarget(): PassGenBuildTarget {
-  return typeof __PASSGEN_TARGET__ === 'string' ? __PASSGEN_TARGET__ : 'desktop'
+  return 'ios'
 }
 
 export function isIOSBuild(): boolean {
