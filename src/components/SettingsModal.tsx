@@ -257,14 +257,12 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
                 </button>
               </div>
               <div className="settings-premium-option">
-                <div className="settings-premium-title">{isIOS ? t('Upgrade with App Store') : t('Become Premium')}</div>
+                <div className="settings-premium-title">{t('Upgrade with App Store')}</div>
                 <div className="settings-premium-sub">
-                  {isIOS
-                    ? t('Use App Store in-app purchase to manage your plan.')
-                    : t('Pick a plan on the payment page, then enter your license key.')}
+                  {t('Use App Store in-app purchase to manage your plan.')}
                 </div>
                 <button className="btn-secondary" onClick={openPremiumUpgrade}>
-                  {isIOS ? t('Upgrade with App Store') : t('Pick a Plan')}
+                  {t('Upgrade with App Store')}
                 </button>
               </div>
             </div>

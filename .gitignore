@@ -1,7 +1,6 @@
 node_modules
 dist
 dist-ios
-dist-electron
 release
 *.log
 .DS_Store
@@ -28,6 +27,3 @@ PassGenKey.key
 
 # -- Runtime config written during build (may contain real API keys) -----------
 dist-ios/passgen-runtime.json
-
-# -- Local resources .env (copied into Electron package) ----------------------
-resources/.env

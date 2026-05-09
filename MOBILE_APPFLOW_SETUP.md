@@ -52,7 +52,7 @@ To ensure the native mobile app correctly unlocks Premium features, the RevenueC
 
 *Note: The iOS App-Specific API Key (`appl_...`) generated from RevenueCat is injected during the cloud build via the `IOS_REVENUECAT_API_KEY` Appflow variable.*
 
-For App Store builds, PassGen uses Apple in-app purchases through RevenueCat. Do not route iOS digital subscription purchases to an external payment page; the native plan sheet resolves the RevenueCat offering and opens the App Store purchase flow for the selected product.
+For App Store builds, PassGen uses Apple in-app purchases through RevenueCat. The native plan sheet resolves the RevenueCat offering and opens the App Store purchase flow for the selected product.
 
 ## Free Local Import
 

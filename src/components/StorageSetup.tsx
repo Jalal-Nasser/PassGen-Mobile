@@ -197,7 +197,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
 
   const formatLicenseError = (error: unknown) => {
     const message = error instanceof Error ? error.message : String(error)
-    const isAuthError = /not authenticated|invalid desktop token|no active app session/i.test(message)
+    const isAuthError = /not authenticated|no active app session/i.test(message)
     if (isAuthError) {
       return { message: t('Not signed in'), isAuthError: true }
     }
@@ -656,11 +656,9 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
                     )}
                   </div>
                   <div className="premium-option">
-                    <div className="premium-title">{isIOS ? t('Upgrade with App Store') : t('Become Premium')}</div>
+                    <div className="premium-title">{t('Upgrade with App Store')}</div>
                     <div className="premium-sub">
-                      {isIOS
-                        ? t('Use App Store in-app purchase to unlock paid storage features.')
-                        : t('Request activation after payment to unlock Premium.')}
+                      {t('Use App Store in-app purchase to unlock paid storage features.')}
                     </div>
                     <div className="premium-action-row">
                       <button
@@ -671,7 +669,7 @@ function StorageSetup({ open, onClose, onConfigured }: StorageSetupProps) {
                           window.dispatchEvent(new Event('open-upgrade'))
                         }}
                       >
-                        {isIOS ? t('Upgrade with App Store') : t('Become Premium')}
+                        {t('Upgrade with App Store')}
                       </button>
                     </div>
                   </div>
