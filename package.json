@@ -1,6 +1,6 @@
 {
   "name": "passgen",
-  "version": "1.0.37",
+  "version": "1.0.39",
   "description": "PassGen Secrets Vault iOS mobile application",
   "engines": {
     "node": ">=20.0.0"
