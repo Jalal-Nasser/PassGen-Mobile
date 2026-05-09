@@ -39,24 +39,28 @@ export class ConfigStore {
   }
 
   private getSellerSecret(): string {
-    // Prefer runtime-configurable secret so you can avoid hardcoding
-    return (
+    // Desktop-only activation secret. iOS/Appflow must never receive this value.
+    // Resolution order:
+    //   1. Runtime window override, set by Electron main before renderer loads.
+    //   2. VITE_SELLER_SECRET, defined only for non-iOS Vite builds.
+    //   3. Hard failure. There is no hardcoded fallback.
+    const secret =
       (window as any)?.PASSGEN_SELLER_SECRET ||
-      localStorage.getItem('passgen-seller-secret') ||
       (import.meta as any)?.env?.VITE_SELLER_SECRET ||
-      'W1IcMo9/5Kw7Mu+kFsXgoep4bcKzfvofElTnvra7PD8=' // fallback
-    )
+      ''
+
+    if (!secret) {
+      throw new Error(
+        'Desktop activation secret is missing. Set VITE_SELLER_SECRET for desktop builds only.'
+      )
+    }
+
+    return secret
   }
 
-  // Dev-only helpers to inspect/override the effective secret without rebuilding
+  // Dev-only helper to inspect the effective desktop secret without logging it.
   getSellerSecretForDebug(): string {
     return this.getSellerSecret()
-  }
-
-  setSellerSecretForDebug(secret: string): void {
-    if (secret && typeof secret === 'string') {
-      localStorage.setItem('passgen-seller-secret', secret)
-    }
   }
 
   computeActivationCode(email?: string): string {

@@ -9,3 +9,25 @@ release
 .vercel
 .env*.local
 build/appx/Square44x44Logo.targetsize-*.png
+
+# -- Certificates, keys & signing credentials ----------------------------------
+# These files MUST never be committed. If they already exist in git history,
+# rotate/revoke them immediately and use `git filter-repo` to purge the history.
+*.p12
+*.cer
+*.pem
+*.key
+*.csr
+*.mobileprovision
+*.provisionprofile
+development.cer
+development.pem
+PassGenConfig.csr
+PassGenIOS.p12
+PassGenKey.key
+
+# -- Runtime config written during build (may contain real API keys) -----------
+dist-ios/passgen-runtime.json
+
+# -- Local resources .env (copied into Electron package) ----------------------
+resources/.env

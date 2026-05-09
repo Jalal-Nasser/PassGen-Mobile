@@ -6,7 +6,6 @@
 //   1) --secret CLI arg
 //   2) SELLER_SECRET env
 //   3) VITE_SELLER_SECRET env (for consistency with build-time secret)
-//   4) Fallback "PG-SEC-2025" (not recommended for production)
 // If .env exists, we load it automatically so VITE_SELLER_SECRET or SELLER_SECRET can be defined there.
 
 try { require('dotenv').config() } catch { }
@@ -35,7 +34,7 @@ function computeCode(installId, email, secret) {
   let installId = args.install || process.env.INSTALL_ID
   let email = args.email || process.env.EMAIL
   const clean = (s) => (s || '').replace(/\s+#.*$/, '').trim()
-  const secret = args.secret || clean(process.env.SELLER_SECRET) || clean(process.env.VITE_SELLER_SECRET) || 'W1IcMo9/5Kw7Mu+kFsXgoep4bcKzfvofElTnvra7PD8='
+  const secret = args.secret || clean(process.env.SELLER_SECRET) || clean(process.env.VITE_SELLER_SECRET)
 
   // Interactive fallback if args/env not provided (helps on Windows npm where flags may not pass through)
   if (!installId || !email) {
@@ -46,8 +45,8 @@ function computeCode(installId, email, secret) {
     rl.close()
   }
 
-  if (!args.secret && !process.env.SELLER_SECRET && !process.env.VITE_SELLER_SECRET) {
-    console.warn('[warn] No secret provided via --secret, SELLER_SECRET, or VITE_SELLER_SECRET. Using fallback "PG-SEC-2025".')
+  if (!secret) {
+    throw new Error('Missing activation secret. Provide --secret, SELLER_SECRET, or VITE_SELLER_SECRET.')
   }
 
   const code = computeCode(installId, email, secret)
@@ -55,7 +54,7 @@ function computeCode(installId, email, secret) {
   console.log('\nInputs:')
   console.log('  Install/Request ID:', installId)
   console.log('  User Email:', email.trim().toLowerCase())
-  console.log('  Secret: ', secret === 'PG-SEC-2025' ? '(default fallback PG-SEC-2025)' : '(provided)')
+  console.log('  Secret: ', '(provided)')
 })().catch((e) => {
   console.error(e)
   process.exit(1)

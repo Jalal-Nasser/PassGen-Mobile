@@ -6,6 +6,14 @@ const distDir = path.resolve('dist-ios')
 const viteHtml = path.join(distDir, 'index.ios.html')
 const capacitorHtml = path.join(distDir, 'index.html')
 const runtimeConfigPath = path.join(distDir, 'passgen-runtime.json')
+const blockedDesktopEnv = ['VITE_SELLER_SECRET', 'SELLER_SECRET', 'PASSGEN_SELLER_SECRET']
+
+for (const key of blockedDesktopEnv) {
+  if (process.env[key]) {
+    console.error(`Refusing iOS artifact: desktop-only ${key} is set in the build environment.`)
+    process.exit(1)
+  }
+}
 
 if (!fs.existsSync(viteHtml)) {
   console.error('Missing dist-ios/index.ios.html. Run vite build --mode ios first.')

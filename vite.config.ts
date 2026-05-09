@@ -1,15 +1,39 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import electron from 'vite-plugin-electron'
 
 export default defineConfig(({ mode }) => {
   const isIOSBuild = mode === 'ios' || process.env.PASSGEN_TARGET === 'ios'
+  const env = loadEnv(mode, process.cwd(), '')
+
+  const desktopSellerSecret =
+    process.env.VITE_SELLER_SECRET ||
+    env.VITE_SELLER_SECRET ||
+    process.env.SELLER_SECRET ||
+    env.SELLER_SECRET ||
+    ''
+
+  if (isIOSBuild && desktopSellerSecret) {
+    throw new Error(
+      'Refusing iOS build: desktop seller/activation secret is present. ' +
+      'Remove VITE_SELLER_SECRET and SELLER_SECRET from Appflow/iOS env.'
+    )
+  }
+
+  const defineConstants: Record<string, string> = {
+    __PASSGEN_TARGET__: JSON.stringify(isIOSBuild ? 'ios' : 'desktop'),
+  }
+
+  if (!isIOSBuild) {
+    defineConstants['import.meta.env.VITE_SELLER_SECRET'] =
+      JSON.stringify(desktopSellerSecret)
+  }
 
   return {
-    define: {
-      'import.meta.env.VITE_SELLER_SECRET': JSON.stringify(process.env.VITE_SELLER_SECRET || ''),
-      __PASSGEN_TARGET__: JSON.stringify(isIOSBuild ? 'ios' : 'desktop')
-    },
+    define: defineConstants,
+    envPrefix: isIOSBuild
+      ? ['VITE_SUPABASE_', 'VITE_REVENUECAT_', 'VITE_GOOGLE_', 'VITE_APPLE_']
+      : 'VITE_',
     plugins: [
       react(),
       ...(!isIOSBuild
@@ -53,6 +77,7 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: isIOSBuild ? 'dist-ios' : 'dist',
       emptyOutDir: true,
+      sourcemap: isIOSBuild ? false : undefined,
       rollupOptions: {
         input: isIOSBuild ? 'index.ios.html' : 'index.html',
         output: {

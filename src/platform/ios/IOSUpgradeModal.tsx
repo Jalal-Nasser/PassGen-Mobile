@@ -1,21 +1,21 @@
 import { useEffect, useState } from 'react'
-import { ConfigStore } from '../../services/configStore'
 import { checkPremiumStatus, getSubscriptionOfferings, purchasePackage } from '../../services/revenuecat'
 import { useI18n } from '../../services/i18n'
 import type { UpgradeModalProps } from '../shared/upgradeTypes'
 import '../../components/UpgradeModal.css'
 
 export default function IOSUpgradeModal({ open, onClose }: UpgradeModalProps) {
-  const store = new ConfigStore()
   const { t } = useI18n()
   const [offerings, setOfferings] = useState<any>(null)
   const [offeringsLoaded, setOfferingsLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [premiumStatus, setPremiumStatus] = useState<'pro' | 'cloud' | 'free'>('free')
 
   useEffect(() => {
     if (!open) return
     setOfferings(null)
     setOfferingsLoaded(false)
+    checkPremiumStatus().then(setPremiumStatus).catch(() => setPremiumStatus('free'))
     getSubscriptionOfferings()
       .then((offs) => {
         if (offs) setOfferings(offs)
@@ -32,7 +32,7 @@ export default function IOSUpgradeModal({ open, onClose }: UpgradeModalProps) {
       await purchasePackage(pkg)
       const status = await checkPremiumStatus()
       if (status !== 'free') {
-        store.setPremium(true)
+        setPremiumStatus(status)
         alert(t('Purchase successful! Premium unlocked.'))
         onClose()
       }
@@ -45,7 +45,7 @@ export default function IOSUpgradeModal({ open, onClose }: UpgradeModalProps) {
 
   if (!open) return null
 
-  if (store.isPremium()) {
+  if (premiumStatus !== 'free') {
     return (
       <div className="modal-backdrop" onClick={onClose}>
         <div className="modal upgrade-modal" onClick={(e) => e.stopPropagation()}>
@@ -69,7 +69,7 @@ export default function IOSUpgradeModal({ open, onClose }: UpgradeModalProps) {
           <p className="modal-sub">{t('Unlimited passwords, cloud backup, and advanced security.')}</p>
         </div>
 
-        <div className="activation-card" style={{ marginTop: '20px' }}>
+        <div style={{ marginTop: '20px' }}>
           {!offeringsLoaded && <p style={{ textAlign: 'center' }}>{t('Loading plans...')}</p>}
           {offeringsLoaded && !offerings && (
             <p style={{ textAlign: 'center' }}>

@@ -12,6 +12,8 @@ if (!roots.length) {
 const blocked = [
   { label: 'license key', pattern: /license\s*key/i },
   { label: 'licenseRedeem', pattern: /licenseRedeem/i },
+  { label: 'seller secret env', pattern: /VITE_SELLER_SECRET|SELLER_SECRET|PASSGEN_SELLER_SECRET/i },
+  { label: 'seller secret wording', pattern: /seller\s+secret/i },
   { label: 'payment page', pattern: /payment\s*page/i },
   { label: 'external payment', pattern: /external\s+payment/i },
   { label: 'stripe', pattern: /\bstripe\b/i },
