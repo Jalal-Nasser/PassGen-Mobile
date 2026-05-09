@@ -6,7 +6,7 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --mode ios",
     "build": "npm run build:ios:web",
     "build:ios:web": "cross-env NODE_OPTIONS=--max-old-space-size=4096 vite build --mode ios && node scripts/prepare-ios-web.js && npm run validate:ios-web",
     "preview": "vite preview",

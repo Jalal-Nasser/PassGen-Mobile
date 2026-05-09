@@ -1,7 +1,5 @@
 {
-  "deno.enable": true,
-  "deno.enablePaths": ["./supabase/functions"],
-  "deno.config": "./supabase/functions/deno.json",
+  "deno.enable": false,
   "typescript.tsdk": "node_modules/typescript/lib",
   "typescript.enablePromptUseWorkspaceTsdk": true,
   "task.allowAutomaticTasks": "off",
