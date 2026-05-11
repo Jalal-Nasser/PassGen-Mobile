@@ -3672,27 +3672,64 @@ private struct NativeUnlockView: View {
                         .foregroundColor(Color.white.opacity(0.92))
 
                     HStack(spacing: 8) {
-                        Group {
-                            if viewModel.showMasterPassword {
-                                TextField("Master Password", text: $viewModel.masterPassword)
-                            } else {
-                                SecureField("Master Password", text: $viewModel.masterPassword)
+                        HStack(spacing: 8) {
+                            Group {
+                                if viewModel.showMasterPassword {
+                                    TextField("Master Password", text: $viewModel.masterPassword)
+                                } else {
+                                    SecureField("Master Password", text: $viewModel.masterPassword)
+                                }
                             }
-                        }
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled(true)
-                        .foregroundColor(Color(red: 30 / 255, green: 41 / 255, blue: 59 / 255))
-                        .tint(Color(red: 102 / 255, green: 126 / 255, blue: 234 / 255))
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled(true)
+                            .foregroundColor(Color(red: 30 / 255, green: 41 / 255, blue: 59 / 255))
+                            .tint(Color(red: 102 / 255, green: 126 / 255, blue: 234 / 255))
 
-                        Button(viewModel.showMasterPassword ? "Hide" : "Show") {
-                            viewModel.showMasterPassword.toggle()
+                            Button(viewModel.showMasterPassword ? "Hide" : "Show") {
+                                viewModel.showMasterPassword.toggle()
+                            }
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(Color(red: 102 / 255, green: 126 / 255, blue: 234 / 255))
                         }
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(Color(red: 102 / 255, green: 126 / 255, blue: 234 / 255))
+                        .padding(12)
+                        .background(Color.white)
+                        .cornerRadius(12)
+                        .frame(maxWidth: .infinity)
+
+                        if viewModel.hasVault && !viewModel.passwordHint.isEmpty {
+                            Button {
+                                showHintTemporarily()
+                            } label: {
+                                Image(systemName: "lightbulb.fill")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(Color(red: 42 / 255, green: 49 / 255, blue: 92 / 255))
+                                    .frame(width: 32, height: 32)
+                                    .background(Color.white.opacity(0.95))
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Show password hint")
+                            .overlay(alignment: .bottomTrailing) {
+                                if showSavedHint {
+                                    Text(viewModel.passwordHint)
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundColor(Color(red: 42 / 255, green: 49 / 255, blue: 92 / 255))
+                                        .multilineTextAlignment(.trailing)
+                                        .lineLimit(3)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 7)
+                                        .frame(maxWidth: 220, alignment: .trailing)
+                                        .background(Color.white)
+                                        .cornerRadius(10)
+                                        .shadow(color: Color.black.opacity(0.18), radius: 8, x: 0, y: 4)
+                                        .offset(y: 42)
+                                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
+                                        .zIndex(3)
+                                }
+                            }
+                            .zIndex(3)
+                        }
                     }
-                    .padding(12)
-                    .background(Color.white)
-                    .cornerRadius(12)
                 }
 
                 if !viewModel.hasVault {
@@ -3709,35 +3746,6 @@ private struct NativeUnlockView: View {
                             .padding(12)
                             .background(Color.white)
                             .cornerRadius(12)
-                    }
-                } else if !viewModel.passwordHint.isEmpty {
-                    VStack(spacing: 8) {
-                        HStack {
-                            Spacer()
-                            Button {
-                                showSavedHint.toggle()
-                            } label: {
-                                Image(systemName: showSavedHint ? "lightbulb.fill" : "lightbulb")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundColor(Color(red: 42 / 255, green: 49 / 255, blue: 92 / 255))
-                                    .frame(width: 40, height: 40)
-                                    .background(Color.white.opacity(0.95))
-                                    .clipShape(Circle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Show password hint")
-                            Spacer()
-                        }
-
-                        if showSavedHint {
-                            Text(viewModel.passwordHint)
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(Color(red: 42 / 255, green: 49 / 255, blue: 92 / 255))
-                                .padding(10)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Color.white.opacity(0.92))
-                                .cornerRadius(12)
-                        }
                     }
                 }
 
@@ -3857,6 +3865,17 @@ private struct NativeUnlockView: View {
         }
         .onChange(of: viewModel.authEmail) { _ in
             viewModel.logVaultLockedStateRender(source: "auth-email-change")
+        }
+    }
+
+    private func showHintTemporarily() {
+        withAnimation(.easeOut(duration: 0.15)) {
+            showSavedHint = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
+            withAnimation(.easeIn(duration: 0.2)) {
+                self.showSavedHint = false
+            }
         }
     }
 }
