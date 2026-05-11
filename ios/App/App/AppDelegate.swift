@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 import LocalAuthentication
 import AuthenticationServices
 import AVFoundation
+import os
 
 #if canImport(GoogleSignIn)
 import GoogleSignIn
@@ -15,6 +16,8 @@ import GoogleSignIn
 #if canImport(RevenueCat)
 import RevenueCat
 #endif
+
+private let passgenAuthLog = Logger(subsystem: "com.mdeploy.passgen", category: "Auth")
 
 private enum MobileRuntimeConfigError: LocalizedError {
     case missingKeys([String])
@@ -408,6 +411,8 @@ private final class SupabaseAuthClient {
     }
 
     func signInWithIDToken(provider: NativeAuthProvider, idToken: String, nonce: String?) async throws -> SupabaseSession {
+        passgenAuthLog.info("Supabase id-token sign-in started provider=\(provider.rawValue, privacy: .public) tokenBytes=\(idToken.utf8.count, privacy: .public) nonce=\((nonce?.isEmpty == false) ? "present" : "none", privacy: .public)")
+
         let endpoint = config.supabaseURL
             .appendingPathComponent("auth/v1/token")
             .withQueryItems([URLQueryItem(name: "grant_type", value: "id_token")])
@@ -501,17 +506,22 @@ private final class SupabaseAuthClient {
             throw SupabaseAuthError.requestFailed(networkConfigMessage(for: request, error: error))
         }
         guard let http = response as? HTTPURLResponse else {
+            passgenAuthLog.error("Supabase token exchange returned non-HTTP response")
             throw SupabaseAuthError.invalidResponse
         }
+
+        passgenAuthLog.info("Supabase token exchange response status=\(http.statusCode, privacy: .public) bytes=\(data.count, privacy: .public)")
 
         guard (200...299).contains(http.statusCode) else {
             let message = (try? JSONDecoder().decode(SupabaseErrorResponse.self, from: data)).flatMap { errorResponse in
                 errorResponse.error_description ?? errorResponse.message ?? errorResponse.error
             } ?? "Supabase auth request failed."
+            passgenAuthLog.error("Supabase token exchange failed status=\(http.statusCode, privacy: .public) message=\(message, privacy: .public)")
             throw SupabaseAuthError.requestFailed(message)
         }
 
         let decoded = try JSONDecoder().decode(SupabaseTokenResponse.self, from: data)
+        passgenAuthLog.info("Supabase session decoded userID=\(decoded.user.id, privacy: .private(mask: .hash)) emailPresent=\((decoded.user.email?.isEmpty == false), privacy: .public)")
         return SupabaseSession(
             accessToken: decoded.access_token,
             refreshToken: decoded.refresh_token,
@@ -1464,6 +1474,7 @@ private final class NativeVaultViewModel: ObservableObject {
     @Published var authProviderLabel = "Not Connected"
     @Published var authEmail = ""
     @Published var authBusy = false
+    @Published var authStatusMessage = ""
     @Published var runtimeConfigIssue: String?
     @Published var cloudSyncProvider: CloudSyncProvider = .none
     @Published var cloudSyncStatus = "Cloud sync disabled"
@@ -1680,6 +1691,7 @@ private final class NativeVaultViewModel: ObservableObject {
             if authProviderLabel == "Not Connected" {
                 authProviderLabel = "Supabase"
             }
+            authStatusMessage = authEmail.isEmpty ? "Signed in with \(authProviderLabel)." : "Signed in with \(authProviderLabel) as \(authEmail)."
         }
         generatedPassword = generatePassword()
 
@@ -1806,21 +1818,30 @@ private final class NativeVaultViewModel: ObservableObject {
     }
 
     func connectAppleAccount(credential: ASAuthorizationAppleIDCredential) {
+        passgenAuthLog.info("Apple authorization completed credentialUser=\(credential.user, privacy: .private(mask: .hash)) emailPresent=\((credential.email?.isEmpty == false), privacy: .public) tokenPresent=\((credential.identityToken != nil), privacy: .public)")
+
         guard let authClient = authClient else {
+            authStatusMessage = runtimeConfigIssue ?? "Mobile runtime config is missing."
+            passgenAuthLog.error("Apple sign-in blocked: auth client unavailable")
             alertState = AlertState(message: runtimeConfigIssue ?? "Mobile runtime config is missing. Add Appflow Native Config values.")
             return
         }
         guard let runtimeConfig, !runtimeConfig.supabaseAnonKey.isEmpty else {
+            authStatusMessage = "Supabase mobile backend is not configured."
+            passgenAuthLog.error("Apple sign-in blocked: Supabase anon key unavailable")
             alertState = AlertState(message: "Supabase mobile backend is not configured.")
             return
         }
         guard let tokenData = credential.identityToken,
               let identityToken = String(data: tokenData, encoding: .utf8),
               !identityToken.isEmpty else {
+            authStatusMessage = "Apple sign-in failed: missing identity token."
+            passgenAuthLog.error("Apple sign-in failed: missing identity token")
             alertState = AlertState(message: "Apple sign-in failed: missing identity token.")
             return
         }
 
+        authStatusMessage = "Completing Apple sign-in..."
         Task {
             await completeSupabaseSignIn(
                 authClient: authClient,
@@ -1931,6 +1952,7 @@ private final class NativeVaultViewModel: ObservableObject {
     func disconnectAccount() {
         authProviderLabel = "Not Connected"
         authEmail = ""
+        authStatusMessage = ""
         session = nil
         apiKeySummaries = []
         developerAPIKey = ""
@@ -2280,8 +2302,10 @@ private final class NativeVaultViewModel: ObservableObject {
         NativeSessionKeychain.save(nextSession)
         authProviderLabel = providerLabel
         authEmail = nextSession.email ?? fallbackEmail ?? authEmail
+        authStatusMessage = authEmail.isEmpty ? "Signed in with \(providerLabel)." : "Signed in with \(providerLabel) as \(authEmail)."
         UserDefaults.standard.set(authProviderLabel, forKey: authProviderStorageKey)
         UserDefaults.standard.set(authEmail, forKey: authEmailStorageKey)
+        passgenAuthLog.info("Applied auth session provider=\(providerLabel, privacy: .public) userID=\(nextSession.userId, privacy: .private(mask: .hash)) emailPresent=\((authEmail.isEmpty == false), privacy: .public)")
     }
 
     private func completeSupabaseSignIn(
@@ -2291,6 +2315,8 @@ private final class NativeVaultViewModel: ObservableObject {
         fallbackEmail: String?,
         nonce: String?
     ) async {
+        passgenAuthLog.info("Native sign-in exchange started provider=\(provider.rawValue, privacy: .public)")
+        authStatusMessage = "Signing in with \(provider == .apple ? "Apple" : "Google")..."
         authBusy = true
         defer { authBusy = false }
 
@@ -2311,6 +2337,7 @@ private final class NativeVaultViewModel: ObservableObject {
             }
             let providerLabel = provider == .apple ? "Apple" : "Google"
             applySession(signedInSession, providerLabel: providerLabel, fallbackEmail: fallbackEmail)
+            passgenAuthLog.info("Native sign-in exchange completed provider=\(providerLabel, privacy: .public)")
             alertState = AlertState(message: "Signed in with \(providerLabel).")
 
             if isPaidTier {
@@ -2325,10 +2352,13 @@ private final class NativeVaultViewModel: ObservableObject {
                 let info = try await fetchRevenueCatCustomerInfo()
                 applyTierFromCustomerInfo(info)
             } catch {
+                passgenAuthLog.warning("RevenueCat sync after sign-in failed: \(error.localizedDescription, privacy: .public)")
                 // ignore RC sync failures during login
             }
 #endif
         } catch {
+            authStatusMessage = signInErrorMessage(provider: provider, error: error)
+            passgenAuthLog.error("Native sign-in failed provider=\(provider.rawValue, privacy: .public) message=\(error.localizedDescription, privacy: .public)")
             alertState = AlertState(message: signInErrorMessage(provider: provider, error: error))
         }
     }
@@ -3274,6 +3304,7 @@ private final class NativeVaultViewModel: ObservableObject {
             authProviderLabel = "Not Connected"
             authEmail = ""
             authBusy = false
+            authStatusMessage = ""
             developerAPIKey = ""
             apiKeySummaries = []
             cloudSyncProvider = .none
@@ -3694,12 +3725,17 @@ private struct NativeUnlockView: View {
                         NativeAppleIconButton(disabled: viewModel.authBusy) { result in
                             switch result {
                             case .success(let authorization):
+                                passgenAuthLog.info("Apple button completion received on unlock screen")
                                 if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
                                     viewModel.connectAppleAccount(credential: credential)
                                 } else {
+                                    passgenAuthLog.error("Apple button completion missing ASAuthorizationAppleIDCredential on unlock screen")
+                                    viewModel.authStatusMessage = "Apple sign-in failed: missing Apple ID credential."
                                     viewModel.alertState = AlertState(message: "Apple sign-in failed: missing Apple ID credential.")
                                 }
                             case .failure(let error):
+                                passgenAuthLog.error("Apple button completion failed on unlock screen: \(error.localizedDescription, privacy: .public)")
+                                viewModel.authStatusMessage = "Apple sign-in failed: \(error.localizedDescription)"
                                 viewModel.alertState = AlertState(message: "Apple sign-in failed: \(error.localizedDescription)")
                             }
                         }
@@ -3718,6 +3754,19 @@ private struct NativeUnlockView: View {
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundColor(Color.white.opacity(0.92))
                         }
+                    }
+
+                    if !viewModel.authStatusMessage.isEmpty {
+                        Text(viewModel.authStatusMessage)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(Color.white)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity)
+                            .background(Color.black.opacity(0.22))
+                            .cornerRadius(12)
+                            .accessibilityIdentifier("auth-status-message")
                     }
 
                     Text("Vault works without sign-in. Sign in for plan and cloud sync features.")
@@ -4017,12 +4066,17 @@ private struct NativeSettingsTabView: View {
                         NativeAppleIconButton(disabled: viewModel.authBusy) { result in
                             switch result {
                             case .success(let authorization):
+                                passgenAuthLog.info("Apple button completion received in settings")
                                 if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
                                     viewModel.connectAppleAccount(credential: credential)
                                 } else {
+                                    passgenAuthLog.error("Apple button completion missing ASAuthorizationAppleIDCredential in settings")
+                                    viewModel.authStatusMessage = "Apple sign-in failed: missing Apple ID credential."
                                     viewModel.alertState = AlertState(message: "Apple sign-in failed: missing Apple ID credential.")
                                 }
                             case .failure(let error):
+                                passgenAuthLog.error("Apple button completion failed in settings: \(error.localizedDescription, privacy: .public)")
+                                viewModel.authStatusMessage = "Apple sign-in failed: \(error.localizedDescription)"
                                 viewModel.alertState = AlertState(message: "Apple sign-in failed: \(error.localizedDescription)")
                             }
                         }
@@ -4039,6 +4093,13 @@ private struct NativeSettingsTabView: View {
                             Text("Signing in...")
                                 .font(.system(size: 13, weight: .medium))
                         }
+                    }
+
+                    if !viewModel.authStatusMessage.isEmpty {
+                        Text(viewModel.authStatusMessage)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(viewModel.authProviderLabel == "Not Connected" ? .red : .secondary)
+                            .accessibilityIdentifier("settings-auth-status-message")
                     }
 
                     if viewModel.authProviderLabel != "Not Connected" {
