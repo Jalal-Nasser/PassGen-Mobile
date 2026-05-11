@@ -1567,6 +1567,10 @@ private final class NativeVaultViewModel: ObservableObject {
         selectedTier == .cloud
     }
 
+    var shouldShowCloudAccountSection: Bool {
+        isPaidTier || isAccountConnected
+    }
+
     var developerTargets: [String] {
         ["Vercel v0", "Replit", "VS Code", "Bolt"]
     }
@@ -1978,12 +1982,6 @@ private final class NativeVaultViewModel: ObservableObject {
 
 #if canImport(GoogleSignIn)
         GIDSignIn.sharedInstance.signOut()
-#endif
-
-#if canImport(RevenueCat)
-        if Purchases.isConfigured {
-            Purchases.shared.logOut { _, _ in }
-        }
 #endif
 
         alertState = AlertState(message: "Account disconnected.")
@@ -2972,17 +2970,7 @@ private final class NativeVaultViewModel: ObservableObject {
         Purchases.logLevel = .debug
 
         if !Purchases.isConfigured {
-            Purchases.configure(withAPIKey: runtimeConfig.revenueCatAPIKey, appUserID: session?.userId)
-        } else if let userID = session?.userId {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                Purchases.shared.logIn(userID) { _, _, error in
-                    if let error {
-                        continuation.resume(throwing: error)
-                    } else {
-                        continuation.resume(returning: ())
-                    }
-                }
-            }
+            Purchases.configure(withAPIKey: runtimeConfig.revenueCatAPIKey)
         }
     }
 
@@ -4137,6 +4125,11 @@ private struct NativeSettingsTabView: View {
                         viewModel.showPlanSheet = true
                     }
 
+                    Button("Restore Purchases") {
+                        viewModel.restorePurchases()
+                    }
+                    .disabled(viewModel.planBusy)
+
                     Button("Redeem Offer Code") {
                         viewModel.redeemAppStoreOfferCode()
                     }
@@ -4146,7 +4139,7 @@ private struct NativeSettingsTabView: View {
                         .foregroundColor(.secondary)
                 }
 
-                if viewModel.hasCloudTools {
+                if viewModel.shouldShowCloudAccountSection {
                 Section("Cloud Account") {
                     Text("Connect an account only when you want encrypted iCloud / Google Drive sync.")
                         .font(.system(size: 13, weight: .medium))
