@@ -8,6 +8,7 @@ import LocalAuthentication
 import AuthenticationServices
 import AVFoundation
 import os
+import StoreKit
 
 #if canImport(GoogleSignIn)
 import GoogleSignIn
@@ -2252,6 +2253,17 @@ private final class NativeVaultViewModel: ObservableObject {
 #endif
     }
 
+    func redeemAppStoreOfferCode() {
+        passgenAuthLog.info("Presenting App Store offer code redemption sheet")
+        planErrorMessage = ""
+        planStatusMessage = "Enter your App Store subscription offer code."
+        SKPaymentQueue.default().presentCodeRedemptionSheet()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) { [weak self] in
+            self?.refreshTierFromRevenueCat()
+        }
+    }
+
     private func purchaseTier(_ tier: PremiumTier) {
 #if canImport(RevenueCat)
         planErrorMessage = ""
@@ -3672,29 +3684,23 @@ private struct NativeUnlockView: View {
                         .foregroundColor(Color.white.opacity(0.92))
 
                     HStack(spacing: 8) {
-                        HStack(spacing: 8) {
-                            Group {
-                                if viewModel.showMasterPassword {
-                                    TextField("Master Password", text: $viewModel.masterPassword)
-                                } else {
-                                    SecureField("Master Password", text: $viewModel.masterPassword)
-                                }
+                        Group {
+                            if viewModel.showMasterPassword {
+                                TextField("Master Password", text: $viewModel.masterPassword)
+                            } else {
+                                SecureField("Master Password", text: $viewModel.masterPassword)
                             }
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled(true)
-                            .foregroundColor(Color(red: 30 / 255, green: 41 / 255, blue: 59 / 255))
-                            .tint(Color(red: 102 / 255, green: 126 / 255, blue: 234 / 255))
-
-                            Button(viewModel.showMasterPassword ? "Hide" : "Show") {
-                                viewModel.showMasterPassword.toggle()
-                            }
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(Color(red: 102 / 255, green: 126 / 255, blue: 234 / 255))
                         }
-                        .padding(12)
-                        .background(Color.white)
-                        .cornerRadius(12)
-                        .frame(maxWidth: .infinity)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled(true)
+                        .foregroundColor(Color(red: 30 / 255, green: 41 / 255, blue: 59 / 255))
+                        .tint(Color(red: 102 / 255, green: 126 / 255, blue: 234 / 255))
+
+                        Button(viewModel.showMasterPassword ? "Hide" : "Show") {
+                            viewModel.showMasterPassword.toggle()
+                        }
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(Color(red: 102 / 255, green: 126 / 255, blue: 234 / 255))
 
                         if viewModel.hasVault && !viewModel.passwordHint.isEmpty {
                             Button {
@@ -3709,25 +3715,29 @@ private struct NativeUnlockView: View {
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("Show password hint")
-                            .overlay(alignment: .bottomTrailing) {
-                                if showSavedHint {
-                                    Text(viewModel.passwordHint)
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundColor(Color(red: 42 / 255, green: 49 / 255, blue: 92 / 255))
-                                        .multilineTextAlignment(.trailing)
-                                        .lineLimit(3)
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 7)
-                                        .frame(maxWidth: 220, alignment: .trailing)
-                                        .background(Color.white)
-                                        .cornerRadius(10)
-                                        .shadow(color: Color.black.opacity(0.18), radius: 8, x: 0, y: 4)
-                                        .offset(y: 42)
-                                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
-                                        .zIndex(3)
-                                }
-                            }
                             .zIndex(3)
+                        }
+                    }
+                    .padding(12)
+                    .background(Color.white)
+                    .cornerRadius(12)
+                    .frame(maxWidth: .infinity)
+                    .overlay(alignment: .topTrailing) {
+                        if showSavedHint {
+                            Text(viewModel.passwordHint)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(Color(red: 42 / 255, green: 49 / 255, blue: 92 / 255))
+                                .multilineTextAlignment(.trailing)
+                                .lineLimit(3)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .frame(maxWidth: 240, alignment: .trailing)
+                                .background(Color.white)
+                                .cornerRadius(10)
+                                .shadow(color: Color.black.opacity(0.18), radius: 8, x: 0, y: 4)
+                                .offset(x: -4, y: -44)
+                                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottomTrailing)))
+                                .zIndex(4)
                         }
                     }
                 }
@@ -3777,69 +3787,15 @@ private struct NativeUnlockView: View {
                 .cornerRadius(12)
 
                 if viewModel.isAccountConnected {
-                    Text("Account connected. Sign-in buttons are hidden while your vault is locked.")
+                    Text("Account connected. Unlock your vault to use sync features.")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(Color.white.opacity(0.84))
                         .multilineTextAlignment(.center)
                 } else {
-                    VStack(spacing: 10) {
-                        Text("Optional account sign-in")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(Color.white.opacity(0.92))
-                        HStack(spacing: 14) {
-                            NativeAppleIconButton(disabled: viewModel.authBusy) { result in
-                                switch result {
-                                case .success(let authorization):
-                                    passgenAuthLog.info("Apple button completion received on unlock screen")
-                                    if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
-                                        viewModel.connectAppleAccount(credential: credential)
-                                    } else {
-                                        passgenAuthLog.error("Apple button completion missing ASAuthorizationAppleIDCredential on unlock screen")
-                                        viewModel.authStatusMessage = "Apple sign-in failed: missing Apple ID credential."
-                                        viewModel.alertState = AlertState(message: "Apple sign-in failed: missing Apple ID credential.")
-                                    }
-                                case .failure(let error):
-                                    passgenAuthLog.error("Apple button completion failed on unlock screen: \(error.localizedDescription, privacy: .public)")
-                                    viewModel.authStatusMessage = "Apple sign-in failed: \(error.localizedDescription)"
-                                    viewModel.alertState = AlertState(message: "Apple sign-in failed: \(error.localizedDescription)")
-                                }
-                            }
-
-                            NativeGoogleIconButton(action: {
-                                viewModel.connectGoogleAccount()
-                            }, disabled: viewModel.authBusy)
-                        }
-                        .frame(maxWidth: .infinity)
-
-                        if viewModel.authBusy {
-                            HStack(spacing: 10) {
-                                ProgressView()
-                                    .tint(.white)
-                                Text("Signing in...")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(Color.white.opacity(0.92))
-                            }
-                        }
-
-                        if !viewModel.authStatusMessage.isEmpty {
-                            Text(viewModel.authStatusMessage)
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(Color.white)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .frame(maxWidth: .infinity)
-                                .background(Color.black.opacity(0.22))
-                                .cornerRadius(12)
-                                .accessibilityIdentifier("auth-status-message")
-                        }
-
-                        Text("Vault works without sign-in. Sign in for plan and cloud sync features.")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(Color.white.opacity(0.84))
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding(.top, 4)
+                    Text("Vault works offline. Account sign-in is available in Cloud Backup settings for CLOUD users.")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(Color.white.opacity(0.84))
+                        .multilineTextAlignment(.center)
                 }
             }
             .padding(18)
@@ -4130,9 +4086,22 @@ private struct NativeSettingsTabView: View {
                     Button("Manage Plans") {
                         viewModel.showPlanSheet = true
                     }
+
+                    Button("Redeem Offer Code") {
+                        viewModel.redeemAppStoreOfferCode()
+                    }
+
+                    Text("Use Apple subscription offer codes created in App Store Connect.")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
                 }
 
-                Section("Authentication") {
+                if viewModel.hasCloudTools {
+                Section("Cloud Account") {
+                    Text("Connect an account only when you want encrypted iCloud / Google Drive sync.")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.secondary)
+
                     if let runtimeConfigIssue = viewModel.runtimeConfigIssue, !runtimeConfigIssue.isEmpty {
                         Text(runtimeConfigIssue)
                             .font(.system(size: 12, weight: .medium))
@@ -4197,6 +4166,7 @@ private struct NativeSettingsTabView: View {
                             viewModel.disconnectAccount()
                         }
                     }
+                }
                 }
 
                 Section("Developer API") {
