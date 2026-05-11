@@ -2305,7 +2305,7 @@ private final class NativeVaultViewModel: ObservableObject {
         authStatusMessage = authEmail.isEmpty ? "Signed in with \(providerLabel)." : "Signed in with \(providerLabel) as \(authEmail)."
         UserDefaults.standard.set(authProviderLabel, forKey: authProviderStorageKey)
         UserDefaults.standard.set(authEmail, forKey: authEmailStorageKey)
-        passgenAuthLog.info("Applied auth session provider=\(providerLabel, privacy: .public) userID=\(nextSession.userId, privacy: .private(mask: .hash)) emailPresent=\((authEmail.isEmpty == false), privacy: .public)")
+        passgenAuthLog.info("Applied auth session provider=\(providerLabel, privacy: .public) userID=\(nextSession.userId, privacy: .private(mask: .hash)) emailPresent=\((self.authEmail.isEmpty == false), privacy: .public)")
     }
 
     private func completeSupabaseSignIn(
