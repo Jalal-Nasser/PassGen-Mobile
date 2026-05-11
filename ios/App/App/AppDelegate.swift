@@ -2253,6 +2253,10 @@ private final class NativeVaultViewModel: ObservableObject {
 #endif
     }
 
+    func refreshSubscriptionStatus() {
+        refreshTierFromRevenueCat()
+    }
+
     func redeemAppStoreOfferCode() {
         passgenAuthLog.info("Presenting App Store offer code redemption sheet")
         planErrorMessage = ""
@@ -3115,14 +3119,60 @@ private final class NativeVaultViewModel: ObservableObject {
     }
 
     private func applyTierFromCustomerInfo(_ customerInfo: CustomerInfo) {
-        if customerInfo.entitlements.active["cloud"] != nil {
-            selectedTier = .cloud
-        } else if customerInfo.entitlements.active["pro"] != nil {
-            selectedTier = .pro
-        } else {
-            selectedTier = .free
-        }
+        let activeEntitlementIDs = Array(customerInfo.entitlements.active.keys)
+        let activeProductIDs = Array(customerInfo.activeSubscriptions)
+        selectedTier = tierFromRevenueCatState(
+            activeEntitlementIDs: activeEntitlementIDs,
+            activeProductIDs: activeProductIDs
+        )
         UserDefaults.standard.set(selectedTier.rawValue, forKey: planStorageKey)
+
+        if selectedTier == .cloud {
+            if cloudSyncProvider == .none {
+                cloudSyncStatus = "Select iCloud Drive or Google Drive to enable cloud sync."
+            } else if isUnlocked {
+                startCloudSyncTimerIfNeeded()
+            }
+        } else if cloudSyncProvider != .none {
+            cloudSyncStatus = "Cloud sync requires the CLOUD monthly plan."
+        }
+
+        let entitlementSummary = activeEntitlementIDs.sorted().joined(separator: ",")
+        let productSummary = activeProductIDs.sorted().joined(separator: ",")
+        passgenAuthLog.info("RevenueCat tier applied tier=\(self.selectedTier.rawValue, privacy: .public) activeEntitlements=\(entitlementSummary, privacy: .private(mask: .hash)) activeProducts=\(productSummary, privacy: .private(mask: .hash))")
+    }
+
+    private func tierFromRevenueCatState(activeEntitlementIDs: [String], activeProductIDs: [String]) -> PremiumTier {
+        let entitlementIDs = activeEntitlementIDs.map(normalizedRevenueCatIdentifier)
+        let productIDs = activeProductIDs.map(normalizedRevenueCatIdentifier)
+        let cloudProductID = normalizedRevenueCatIdentifier(runtimeConfig?.revenueCatCloudProductID ?? "passgen_cloud_monthly")
+        let proProductID = normalizedRevenueCatIdentifier(runtimeConfig?.revenueCatProProductID ?? "passgen_pro_monthly")
+
+        if entitlementIDs.contains(where: isCloudRevenueCatIdentifier) ||
+            productIDs.contains(cloudProductID) ||
+            productIDs.contains(where: isCloudRevenueCatIdentifier) {
+            return .cloud
+        }
+
+        if entitlementIDs.contains(where: isProRevenueCatIdentifier) ||
+            productIDs.contains(proProductID) ||
+            productIDs.contains(where: isProRevenueCatIdentifier) {
+            return .pro
+        }
+
+        return .free
+    }
+
+    private func normalizedRevenueCatIdentifier(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private func isCloudRevenueCatIdentifier(_ value: String) -> Bool {
+        value == "cloud" || value == "passgen_cloud_monthly" || value.contains("cloud")
+    }
+
+    private func isProRevenueCatIdentifier(_ value: String) -> Bool {
+        value == "pro" || value == "passgen_pro_monthly" || value.contains("pro")
     }
 #endif
 
@@ -4283,12 +4333,31 @@ private struct NativeSettingsTabView: View {
                     }
                     .disabled(!viewModel.isPaidTier)
 
-                    Button("Import from iCloud / Google Drive") {
-                        if viewModel.hasCloudTools {
-                            importKind = .backup
-                        } else {
-                            viewModel.alertState = AlertState(message: "Upgrade to CLOUD to import backups from iCloud/Google Drive.")
-                            viewModel.showPlanSheet = true
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Import backup from")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.secondary)
+
+                        HStack(spacing: 16) {
+                            NativeCloudImportIconButton(provider: .icloud, locked: !viewModel.hasCloudTools) {
+                                if viewModel.hasCloudTools {
+                                    viewModel.setCloudProvider(.icloud)
+                                    importKind = .backup
+                                } else {
+                                    viewModel.alertState = AlertState(message: "Upgrade to CLOUD to import backups from iCloud Drive.")
+                                    viewModel.showPlanSheet = true
+                                }
+                            }
+
+                            NativeCloudImportIconButton(provider: .googleDrive, locked: !viewModel.hasCloudTools) {
+                                if viewModel.hasCloudTools {
+                                    viewModel.setCloudProvider(.googleDrive)
+                                    importKind = .backup
+                                } else {
+                                    viewModel.alertState = AlertState(message: "Upgrade to CLOUD to import backups from Google Drive.")
+                                    viewModel.showPlanSheet = true
+                                }
+                            }
                         }
                     }
 
@@ -4371,6 +4440,9 @@ private struct NativeSettingsTabView: View {
             }
         }
         .navigationViewStyle(.stack)
+        .onAppear {
+            viewModel.refreshSubscriptionStatus()
+        }
     }
 }
 
@@ -4723,6 +4795,69 @@ private struct NativeAppleIconButton: View {
         .disabled(disabled)
         .opacity(disabled ? 0.68 : 1)
         .accessibilityLabel("Continue with Apple")
+    }
+}
+
+private struct NativeCloudImportIconButton: View {
+    let provider: CloudSyncProvider
+    var locked: Bool = false
+    let action: () -> Void
+
+    private var title: String {
+        switch provider {
+        case .icloud:
+            return "iCloud"
+        case .googleDrive:
+            return "Google Drive"
+        case .none:
+            return "Cloud"
+        }
+    }
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                ZStack {
+                    Circle()
+                        .fill(provider == .icloud ? Color.black : Color.white)
+
+                    if provider == .icloud {
+                        Image(systemName: "applelogo")
+                            .font(.system(size: 23, weight: .semibold))
+                            .foregroundColor(.white)
+                    } else {
+                        if UIImage(named: "GoogleGIcon") != nil {
+                            Image("GoogleGIcon")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 23, height: 23)
+                        } else {
+                            GoogleSignInLogoView(size: 23)
+                        }
+                    }
+
+                    if locked {
+                        Circle()
+                            .fill(Color.white.opacity(0.72))
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .frame(width: 46, height: 46)
+                .overlay(
+                    Circle()
+                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                )
+
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(locked ? .secondary : Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
+            }
+            .frame(minWidth: 84)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Import from \(title)")
     }
 }
 
