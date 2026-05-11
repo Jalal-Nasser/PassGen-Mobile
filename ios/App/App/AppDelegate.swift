@@ -548,6 +548,10 @@ private final class SupabaseAuthClient {
             let message = (try? JSONDecoder().decode(SupabaseErrorResponse.self, from: data)).flatMap { errorResponse in
                 errorResponse.message ?? errorResponse.error_description ?? errorResponse.error
             } ?? "Supabase request failed."
+            let normalizedMessage = message.lowercased()
+            if http.statusCode == 404 && normalizedMessage.contains("function") && normalizedMessage.contains("not found") {
+                throw SupabaseAuthError.requestFailed("Developer API backend is not deployed. Deploy the mobile-api-keys-create/list/revoke/verify Supabase Edge Functions to this app's Supabase project.")
+            }
             throw SupabaseAuthError.requestFailed(message)
         }
 
@@ -2091,8 +2095,8 @@ private final class NativeVaultViewModel: ObservableObject {
             return
         }
 
-        guard hasCloudTools else {
-            alertState = AlertState(message: "Import from iCloud/Google Drive is available on the CLOUD monthly plan.")
+        guard isPaidTier else {
+            alertState = AlertState(message: "Backup import is available for paid users (PRO/CLOUD).")
             showPlanSheet = true
             return
         }
@@ -2206,6 +2210,11 @@ private final class NativeVaultViewModel: ObservableObject {
         UserDefaults.standard.set(provider.rawValue, forKey: cloudProviderStorageKey)
         if provider == .none {
             cloudSyncStatus = "Cloud sync disabled"
+            stopCloudSyncTimer()
+        } else if !hasCloudTools {
+            cloudSyncStatus = isPaidTier
+                ? "Manual backup import/export available. CLOUD adds automatic sync."
+                : "Cloud backup requires a paid plan."
             stopCloudSyncTimer()
         } else if isUnlocked {
             startCloudSyncTimerIfNeeded()
@@ -3121,8 +3130,10 @@ private final class NativeVaultViewModel: ObservableObject {
             } else if isUnlocked {
                 startCloudSyncTimerIfNeeded()
             }
+        } else if selectedTier == .pro {
+            cloudSyncStatus = "Manual backup import/export available. CLOUD adds automatic sync."
         } else if cloudSyncProvider != .none {
-            cloudSyncStatus = "Cloud sync requires the CLOUD monthly plan."
+            cloudSyncStatus = "Cloud backup requires a paid plan."
         }
 
         let entitlementSummary = activeEntitlementIDs.sorted().joined(separator: ",")
@@ -3689,33 +3700,6 @@ private struct NativeUnlockView: View {
                 .foregroundColor(Color.white.opacity(0.9))
 
             VStack(spacing: 14) {
-                if viewModel.isAccountConnected {
-                    VStack(spacing: 10) {
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.system(size: 34, weight: .bold))
-                            .foregroundColor(Color(red: 34 / 255, green: 197 / 255, blue: 94 / 255))
-
-                        Text("Signed in successfully")
-                            .font(.system(size: 17, weight: .bold))
-                            .foregroundColor(.white)
-
-                        Text(viewModel.connectedAccountDisplay)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(Color.white.opacity(0.92))
-                            .multilineTextAlignment(.center)
-
-                        Text("Your account is connected. Unlock your encrypted vault with your master password.")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(Color.white.opacity(0.84))
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity)
-                    .background(Color.black.opacity(0.22))
-                    .cornerRadius(16)
-                    .accessibilityIdentifier("authenticated-vault-locked-state")
-                }
-
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Master Password")
                         .font(.system(size: 13, weight: .semibold))
@@ -3824,17 +3808,10 @@ private struct NativeUnlockView: View {
                 .foregroundColor(Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
                 .cornerRadius(12)
 
-                if viewModel.isAccountConnected {
-                    Text("Account connected. Unlock your vault to use sync features.")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(Color.white.opacity(0.84))
-                        .multilineTextAlignment(.center)
-                } else {
-                    Text("Vault works offline. Account sign-in is available in Cloud Backup settings for CLOUD users.")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(Color.white.opacity(0.84))
-                        .multilineTextAlignment(.center)
-                }
+                Text("Vault works offline. Account sign-in is available in Settings for paid sync features.")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(Color.white.opacity(0.84))
+                    .multilineTextAlignment(.center)
             }
             .padding(18)
             .background(Color.white.opacity(viewModel.isAccountConnected ? 0.26 : 0.2))
@@ -4289,7 +4266,7 @@ private struct NativeSettingsTabView: View {
                 }
 
                 Section("Cloud Backup") {
-                    Text("CLOUD plan supports encrypted backup import from iCloud Drive / Google Drive and backup export through Files.")
+                    Text("PRO and CLOUD support encrypted backup import/export through Files. CLOUD adds automatic provider sync.")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.secondary)
 
@@ -4301,7 +4278,7 @@ private struct NativeSettingsTabView: View {
                             Text(provider.title).tag(provider)
                         }
                     }
-                    .disabled(!viewModel.hasCloudTools)
+                    .disabled(!viewModel.isPaidTier)
 
                     if let lastSync = viewModel.lastCloudSyncAt {
                         Text("Last sync: \(lastSync.formatted(date: .abbreviated, time: .shortened))")
@@ -4332,22 +4309,22 @@ private struct NativeSettingsTabView: View {
                             .foregroundColor(.secondary)
 
                         HStack(spacing: 16) {
-                            NativeCloudImportIconButton(provider: .icloud, locked: !viewModel.hasCloudTools) {
-                                if viewModel.hasCloudTools {
+                            NativeCloudImportIconButton(provider: .icloud, locked: !viewModel.isPaidTier) {
+                                if viewModel.isPaidTier {
                                     viewModel.setCloudProvider(.icloud)
                                     importKind = .backup
                                 } else {
-                                    viewModel.alertState = AlertState(message: "Upgrade to CLOUD to import backups from iCloud Drive.")
+                                    viewModel.alertState = AlertState(message: "Upgrade to PRO or CLOUD to import backups from iCloud Drive.")
                                     viewModel.showPlanSheet = true
                                 }
                             }
 
-                            NativeCloudImportIconButton(provider: .googleDrive, locked: !viewModel.hasCloudTools) {
-                                if viewModel.hasCloudTools {
+                            NativeCloudImportIconButton(provider: .googleDrive, locked: !viewModel.isPaidTier) {
+                                if viewModel.isPaidTier {
                                     viewModel.setCloudProvider(.googleDrive)
                                     importKind = .backup
                                 } else {
-                                    viewModel.alertState = AlertState(message: "Upgrade to CLOUD to import backups from Google Drive.")
+                                    viewModel.alertState = AlertState(message: "Upgrade to PRO or CLOUD to import backups from Google Drive.")
                                     viewModel.showPlanSheet = true
                                 }
                             }
