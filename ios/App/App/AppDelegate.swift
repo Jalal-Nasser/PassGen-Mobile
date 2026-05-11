@@ -1548,6 +1548,20 @@ private final class NativeVaultViewModel: ObservableObject {
         selectedTier == .pro || selectedTier == .cloud
     }
 
+    var isAccountConnected: Bool {
+        session != nil || authProviderLabel != "Not Connected"
+    }
+
+    var connectedAccountDisplay: String {
+        if !authEmail.isEmpty {
+            return authEmail
+        }
+        if authProviderLabel != "Not Connected" {
+            return "\(authProviderLabel) account connected"
+        }
+        return "No account connected"
+    }
+
     var hasCloudTools: Bool {
         selectedTier == .cloud
     }
@@ -2305,7 +2319,15 @@ private final class NativeVaultViewModel: ObservableObject {
         authStatusMessage = authEmail.isEmpty ? "Signed in with \(providerLabel)." : "Signed in with \(providerLabel) as \(authEmail)."
         UserDefaults.standard.set(authProviderLabel, forKey: authProviderStorageKey)
         UserDefaults.standard.set(authEmail, forKey: authEmailStorageKey)
+        passgenAuthLog.info("Auth state transitioned to authenticated provider=\(providerLabel, privacy: .public)")
         passgenAuthLog.info("Applied auth session provider=\(providerLabel, privacy: .public) userID=\(nextSession.userId, privacy: .private(mask: .hash)) emailPresent=\((self.authEmail.isEmpty == false), privacy: .public)")
+    }
+
+    func logVaultLockedStateRender(source: String) {
+        passgenAuthLog.info("Vault locked state rendered source=\(source, privacy: .public) authenticated=\(self.isAccountConnected, privacy: .public) hasVault=\(self.hasVault, privacy: .public)")
+        if isAccountConnected {
+            passgenAuthLog.info("Authenticated vault locked UI rendered provider=\(self.authProviderLabel, privacy: .public) emailPresent=\((self.authEmail.isEmpty == false), privacy: .public)")
+        }
     }
 
     private func completeSupabaseSignIn(
@@ -3607,14 +3629,43 @@ private struct NativeUnlockView: View {
         VStack(spacing: 18) {
             NativeLogoView()
 
-            Text("PassGen Vault")
+            Text(viewModel.isAccountConnected ? "Vault Locked" : "PassGen Vault")
                 .font(.system(size: 30, weight: .bold))
                 .foregroundColor(.white)
 
-            Text(viewModel.hasVault ? "Unlock your local vault" : "Create your local vault")
+            Text(viewModel.isAccountConnected
+                 ? "Enter your master password to continue"
+                 : (viewModel.hasVault ? "Unlock your local vault" : "Create your local vault"))
                 .foregroundColor(Color.white.opacity(0.9))
 
             VStack(spacing: 14) {
+                if viewModel.isAccountConnected {
+                    VStack(spacing: 10) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 34, weight: .bold))
+                            .foregroundColor(Color(red: 34 / 255, green: 197 / 255, blue: 94 / 255))
+
+                        Text("Signed in successfully")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundColor(.white)
+
+                        Text(viewModel.connectedAccountDisplay)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(Color.white.opacity(0.92))
+                            .multilineTextAlignment(.center)
+
+                        Text("Your account is connected. Unlock your encrypted vault with your master password.")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(Color.white.opacity(0.84))
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.black.opacity(0.22))
+                    .cornerRadius(16)
+                    .accessibilityIdentifier("authenticated-vault-locked-state")
+                }
+
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Master Password")
                         .font(.system(size: 13, weight: .semibold))
@@ -3717,68 +3768,79 @@ private struct NativeUnlockView: View {
                 .foregroundColor(Color(red: 62 / 255, green: 78 / 255, blue: 184 / 255))
                 .cornerRadius(12)
 
-                VStack(spacing: 10) {
-                    Text("Optional account sign-in")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(Color.white.opacity(0.92))
-                    HStack(spacing: 14) {
-                        NativeAppleIconButton(disabled: viewModel.authBusy) { result in
-                            switch result {
-                            case .success(let authorization):
-                                passgenAuthLog.info("Apple button completion received on unlock screen")
-                                if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
-                                    viewModel.connectAppleAccount(credential: credential)
-                                } else {
-                                    passgenAuthLog.error("Apple button completion missing ASAuthorizationAppleIDCredential on unlock screen")
-                                    viewModel.authStatusMessage = "Apple sign-in failed: missing Apple ID credential."
-                                    viewModel.alertState = AlertState(message: "Apple sign-in failed: missing Apple ID credential.")
-                                }
-                            case .failure(let error):
-                                passgenAuthLog.error("Apple button completion failed on unlock screen: \(error.localizedDescription, privacy: .public)")
-                                viewModel.authStatusMessage = "Apple sign-in failed: \(error.localizedDescription)"
-                                viewModel.alertState = AlertState(message: "Apple sign-in failed: \(error.localizedDescription)")
-                            }
-                        }
-
-                        NativeGoogleIconButton(action: {
-                            viewModel.connectGoogleAccount()
-                        }, disabled: viewModel.authBusy)
-                    }
-                    .frame(maxWidth: .infinity)
-
-                    if viewModel.authBusy {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                                .tint(.white)
-                            Text("Signing in...")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(Color.white.opacity(0.92))
-                        }
-                    }
-
-                    if !viewModel.authStatusMessage.isEmpty {
-                        Text(viewModel.authStatusMessage)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(Color.white)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .frame(maxWidth: .infinity)
-                            .background(Color.black.opacity(0.22))
-                            .cornerRadius(12)
-                            .accessibilityIdentifier("auth-status-message")
-                    }
-
-                    Text("Vault works without sign-in. Sign in for plan and cloud sync features.")
+                if viewModel.isAccountConnected {
+                    Text("Account connected. Sign-in buttons are hidden while your vault is locked.")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(Color.white.opacity(0.84))
                         .multilineTextAlignment(.center)
+                } else {
+                    VStack(spacing: 10) {
+                        Text("Optional account sign-in")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(Color.white.opacity(0.92))
+                        HStack(spacing: 14) {
+                            NativeAppleIconButton(disabled: viewModel.authBusy) { result in
+                                switch result {
+                                case .success(let authorization):
+                                    passgenAuthLog.info("Apple button completion received on unlock screen")
+                                    if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
+                                        viewModel.connectAppleAccount(credential: credential)
+                                    } else {
+                                        passgenAuthLog.error("Apple button completion missing ASAuthorizationAppleIDCredential on unlock screen")
+                                        viewModel.authStatusMessage = "Apple sign-in failed: missing Apple ID credential."
+                                        viewModel.alertState = AlertState(message: "Apple sign-in failed: missing Apple ID credential.")
+                                    }
+                                case .failure(let error):
+                                    passgenAuthLog.error("Apple button completion failed on unlock screen: \(error.localizedDescription, privacy: .public)")
+                                    viewModel.authStatusMessage = "Apple sign-in failed: \(error.localizedDescription)"
+                                    viewModel.alertState = AlertState(message: "Apple sign-in failed: \(error.localizedDescription)")
+                                }
+                            }
+
+                            NativeGoogleIconButton(action: {
+                                viewModel.connectGoogleAccount()
+                            }, disabled: viewModel.authBusy)
+                        }
+                        .frame(maxWidth: .infinity)
+
+                        if viewModel.authBusy {
+                            HStack(spacing: 10) {
+                                ProgressView()
+                                    .tint(.white)
+                                Text("Signing in...")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(Color.white.opacity(0.92))
+                            }
+                        }
+
+                        if !viewModel.authStatusMessage.isEmpty {
+                            Text(viewModel.authStatusMessage)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(Color.white)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .frame(maxWidth: .infinity)
+                                .background(Color.black.opacity(0.22))
+                                .cornerRadius(12)
+                                .accessibilityIdentifier("auth-status-message")
+                        }
+
+                        Text("Vault works without sign-in. Sign in for plan and cloud sync features.")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(Color.white.opacity(0.84))
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.top, 4)
                 }
-                .padding(.top, 4)
             }
             .padding(18)
-            .background(Color.white.opacity(0.2))
+            .background(Color.white.opacity(viewModel.isAccountConnected ? 0.26 : 0.2))
             .cornerRadius(20)
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(viewModel.isAccountConnected ? Color.white.opacity(0.42) : Color.clear, lineWidth: 1)
+            )
             .padding(.horizontal, 16)
 
             NativeLegalFooterView(onOpenURL: viewModel.openExternal, onDarkBackground: true)
@@ -3787,6 +3849,15 @@ private struct NativeUnlockView: View {
         }
         .padding(.top, 24)
         .padding(.horizontal, 10)
+        .onAppear {
+            viewModel.logVaultLockedStateRender(source: "unlock-view-appear")
+        }
+        .onChange(of: viewModel.authProviderLabel) { _ in
+            viewModel.logVaultLockedStateRender(source: "auth-provider-change")
+        }
+        .onChange(of: viewModel.authEmail) { _ in
+            viewModel.logVaultLockedStateRender(source: "auth-email-change")
+        }
     }
 }
 
