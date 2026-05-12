@@ -203,16 +203,10 @@
 							com.apple.ApplicationGroups.iOS = {
 								enabled = 1;
 							};
-							com.apple.AuthenticationServices.AutoFillCredentialProvider = {
-								enabled = 1;
-							};
 							com.apple.InAppPurchase = {
 								enabled = 1;
 							};
 							com.apple.Keychain = {
-								enabled = 1;
-							};
-							com.apple.SafariKeychain = {
 								enabled = 1;
 							};
 						};
@@ -228,9 +222,6 @@
 								enabled = 1;
 							};
 							com.apple.Keychain = {
-								enabled = 1;
-							};
-							com.apple.SafariKeychain = {
 								enabled = 1;
 							};
 						};
