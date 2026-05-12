@@ -1004,7 +1004,7 @@ private enum PassGenAutofillSharedStore {
     }
 
     private static func replaceCredentialIdentities(with metadata: [AutofillCredentialMetadata]) {
-        var identities: [ASCredentialIdentity] = []
+        var identities: [ASPasswordCredentialIdentity] = []
         for item in metadata {
             let serviceIdentifier = item.credentialServiceIdentifier
             if item.hasPassword {
@@ -1018,17 +1018,7 @@ private enum PassGenAutofillSharedStore {
             }
 
             if item.hasOneTimeCode {
-                if #available(iOS 18.0, *) {
-                    let identity = ASOneTimeCodeCredentialIdentity(
-                        serviceIdentifier: serviceIdentifier,
-                        label: item.oneTimeCodeLabel,
-                        recordIdentifier: item.oneTimeCodeRecordIdentifier
-                    )
-                    identity.rank = 0
-                    identities.append(identity)
-                } else {
-                    passgenAuthLog.info("Skipping AutoFill OTP identity because this iOS version does not support third-party one-time-code identities.")
-                }
+                passgenAuthLog.info("AutoFill OTP metadata exported; OTP identities are served by the credential provider extension on supported iOS versions.")
             }
         }
 
@@ -1259,7 +1249,7 @@ private enum NativeKeychain {
 
         guard let passwordData = password.data(using: .utf8) else { return }
 
-        let query: [String: Any] = [
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
