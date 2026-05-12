@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 import LocalAuthentication
 import AuthenticationServices
 import AVFoundation
+import Network
 import os
 import StoreKit
 
@@ -230,6 +231,10 @@ private enum CloudSyncProvider: String, CaseIterable, Codable, Hashable {
         case .googleDrive:
             return "Google Drive"
         }
+    }
+
+    var requiresCloudAuth: Bool {
+        self == .googleDrive
     }
 }
 
@@ -867,6 +872,176 @@ private struct VaultEntry: Codable, Identifiable, Hashable {
     var updatedAt: Date
 }
 
+private struct AutofillCredentialMetadata: Codable, Hashable {
+    var id: String
+    var serviceIdentifier: String
+    var serviceIdentifierType: String
+    var serviceName: String
+    var username: String
+    var domain: String?
+    var hasPassword: Bool
+    var hasOneTimeCode: Bool
+    var updatedAt: Date
+
+    var passwordRecordIdentifier: String {
+        id
+    }
+
+    var oneTimeCodeRecordIdentifier: String {
+        "\(id):totp"
+    }
+
+    var oneTimeCodeLabel: String {
+        let trimmedService = serviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedUser = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedService.isEmpty, !trimmedUser.isEmpty {
+            return "\(trimmedService) (\(trimmedUser))"
+        }
+        return trimmedService.isEmpty ? "PassGen code" : trimmedService
+    }
+
+    var credentialServiceIdentifier: ASCredentialServiceIdentifier {
+        let type: ASCredentialServiceIdentifier.IdentifierType = serviceIdentifierType == "URL" ? .URL : .domain
+        return ASCredentialServiceIdentifier(identifier: serviceIdentifier, type: type)
+    }
+}
+
+private struct AutofillMetadataPayload: Codable {
+    var version: Int
+    var updatedAt: Date
+    var credentials: [AutofillCredentialMetadata]
+}
+
+private enum PassGenAutofillSharedStore {
+    static let appGroupIdentifier = "group.com.mdeploy.passgen"
+    static let metadataFileName = "autofill-metadata.json"
+    static let encryptedVaultFileName = "passgen-vault.pgvault"
+
+    private static let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return encoder
+    }()
+
+    private static var containerURL: URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)
+    }
+
+    static func sync(entries: [VaultEntry], encryptedVaultURL: URL) {
+        guard let containerURL else {
+            passgenAuthLog.error("AutoFill App Group container unavailable group=\(appGroupIdentifier, privacy: .public)")
+            return
+        }
+
+        do {
+            try FileManager.default.createDirectory(at: containerURL, withIntermediateDirectories: true)
+            if FileManager.default.fileExists(atPath: encryptedVaultURL.path) {
+                let encryptedData = try Data(contentsOf: encryptedVaultURL)
+                try encryptedData.write(to: containerURL.appendingPathComponent(encryptedVaultFileName), options: .atomic)
+            }
+
+            let metadata = entries.compactMap(makeMetadata)
+            let payload = AutofillMetadataPayload(version: 1, updatedAt: Date(), credentials: metadata)
+            let payloadData = try encoder.encode(payload)
+            try payloadData.write(to: containerURL.appendingPathComponent(metadataFileName), options: .atomic)
+            replaceCredentialIdentities(with: metadata)
+            passgenAuthLog.info("AutoFill metadata synced credentials=\(metadata.count, privacy: .public)")
+        } catch {
+            passgenAuthLog.error("AutoFill metadata sync failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    static func clear() {
+        guard let containerURL else { return }
+        try? FileManager.default.removeItem(at: containerURL.appendingPathComponent(metadataFileName))
+        try? FileManager.default.removeItem(at: containerURL.appendingPathComponent(encryptedVaultFileName))
+        ASCredentialIdentityStore.shared.removeAllCredentialIdentities { success, error in
+            if let error {
+                passgenAuthLog.error("AutoFill identity clear failed success=\(success, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+            } else {
+                passgenAuthLog.info("AutoFill identities cleared success=\(success, privacy: .public)")
+            }
+        }
+    }
+
+    private static func makeMetadata(from entry: VaultEntry) -> AutofillCredentialMetadata? {
+        let username = entry.username.trimmingCharacters(in: .whitespacesAndNewlines)
+        let entryName = entry.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let url = entry.url.trimmingCharacters(in: .whitespacesAndNewlines)
+        let domain = (entry.websiteDomain ?? normalizedDomain(from: url))?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+        let hasPassword = !username.isEmpty && !entry.password.isEmpty
+        let hasOneTimeCode = entry.totpSecret?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+
+        guard hasPassword || hasOneTimeCode else { return nil }
+
+        if let domain {
+            return AutofillCredentialMetadata(
+                id: entry.id,
+                serviceIdentifier: domain,
+                serviceIdentifierType: "domain",
+                serviceName: entryName.isEmpty ? domain : entryName,
+                username: username,
+                domain: domain,
+                hasPassword: hasPassword,
+                hasOneTimeCode: hasOneTimeCode,
+                updatedAt: entry.updatedAt
+            )
+        }
+
+        guard !url.isEmpty else { return nil }
+        return AutofillCredentialMetadata(
+            id: entry.id,
+            serviceIdentifier: url,
+            serviceIdentifierType: "URL",
+            serviceName: entryName.isEmpty ? url : entryName,
+            username: username,
+            domain: nil,
+            hasPassword: hasPassword,
+            hasOneTimeCode: hasOneTimeCode,
+            updatedAt: entry.updatedAt
+        )
+    }
+
+    private static func replaceCredentialIdentities(with metadata: [AutofillCredentialMetadata]) {
+        var identities: [ASCredentialIdentity] = []
+        for item in metadata {
+            let serviceIdentifier = item.credentialServiceIdentifier
+            if item.hasPassword {
+                let identity = ASPasswordCredentialIdentity(
+                    serviceIdentifier: serviceIdentifier,
+                    user: item.username,
+                    recordIdentifier: item.passwordRecordIdentifier
+                )
+                identity.rank = 0
+                identities.append(identity)
+            }
+
+            if item.hasOneTimeCode {
+                if #available(iOS 18.0, *) {
+                    let identity = ASOneTimeCodeCredentialIdentity(
+                        serviceIdentifier: serviceIdentifier,
+                        label: item.oneTimeCodeLabel,
+                        recordIdentifier: item.oneTimeCodeRecordIdentifier
+                    )
+                    identity.rank = 0
+                    identities.append(identity)
+                } else {
+                    passgenAuthLog.info("Skipping AutoFill OTP identity because this iOS version does not support third-party one-time-code identities.")
+                }
+            }
+        }
+
+        ASCredentialIdentityStore.shared.replaceCredentialIdentities(with: identities) { success, error in
+            if let error {
+                passgenAuthLog.error("AutoFill identity replace failed success=\(success, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+            } else {
+                passgenAuthLog.info("AutoFill identities replaced count=\(identities.count, privacy: .public) success=\(success, privacy: .public)")
+            }
+        }
+    }
+}
+
 private struct VaultEntryDraft {
     var id: String?
     var name: String
@@ -1064,6 +1239,13 @@ private struct VaultFile: Codable {
 private enum NativeKeychain {
     private static let service = "com.passgen.native.ios"
     private static let account = "vault-master-password"
+    private static let accessGroupInfoKey = "PassGenKeychainAccessGroup"
+
+    private static var sharedAccessGroup: String? {
+        (Bundle.main.object(forInfoDictionaryKey: accessGroupInfoKey) as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nonEmpty
+    }
 
     static func saveMasterPassword(_ password: String) {
         deleteMasterPassword()
@@ -1084,6 +1266,9 @@ private enum NativeKeychain {
             kSecAttrAccessControl as String: accessControl,
             kSecValueData as String: passwordData
         ]
+        if let sharedAccessGroup {
+            query[kSecAttrAccessGroup as String] = sharedAccessGroup
+        }
 
         SecItemAdd(query as CFDictionary, nil)
     }
@@ -1117,15 +1302,28 @@ private enum NativeKeychain {
 
     private static func readMasterPassword(using context: LAContext) -> String? {
         context.interactionNotAllowed = true
-        var item: CFTypeRef?
-        let query: [String: Any] = [
+        var sharedQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecUseAuthenticationContext as String: context
         ]
+        if let sharedAccessGroup {
+            sharedQuery[kSecAttrAccessGroup as String] = sharedAccessGroup
+        }
 
+        if let value = readPassword(query: sharedQuery) {
+            return value
+        }
+
+        var legacyQuery = sharedQuery
+        legacyQuery.removeValue(forKey: kSecAttrAccessGroup as String)
+        return readPassword(query: legacyQuery)
+    }
+
+    private static func readPassword(query: [String: Any]) -> String? {
+        var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         guard status == errSecSuccess,
               let data = item as? Data,
@@ -1137,12 +1335,19 @@ private enum NativeKeychain {
     }
 
     static func deleteMasterPassword() {
-        let query: [String: Any] = [
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account
         ]
+        if let sharedAccessGroup {
+            query[kSecAttrAccessGroup as String] = sharedAccessGroup
+        }
         SecItemDelete(query as CFDictionary)
+
+        var legacyQuery = query
+        legacyQuery.removeValue(forKey: kSecAttrAccessGroup as String)
+        SecItemDelete(legacyQuery as CFDictionary)
     }
 }
 
@@ -1484,6 +1689,8 @@ private final class NativeVaultViewModel: ObservableObject {
     @Published var cloudSyncProvider: CloudSyncProvider = .none
     @Published var cloudSyncStatus = "Cloud sync disabled"
     @Published var lastCloudSyncAt: Date?
+    @Published var cloudSyncInProgress = false
+    @Published var isNetworkAvailable = true
     @Published var planBusy = false
     @Published var planStatusMessage = ""
     @Published var planErrorMessage = ""
@@ -1511,7 +1718,9 @@ private final class NativeVaultViewModel: ObservableObject {
     private let authClient: SupabaseAuthClient?
     private var session: SupabaseSession?
     private var cloudSyncTimer: Timer?
-    private var cloudSyncInFlight = false
+    private let networkMonitor = NWPathMonitor()
+    private let networkMonitorQueue = DispatchQueue(label: "com.mdeploy.passgen.network-monitor")
+    private var lastLoggedSyncDisabledReason = ""
     private var lastSuccessfulPassword = ""
     private let onboardingPagesData: [OnboardingPage] = [
         OnboardingPage(
@@ -1539,6 +1748,10 @@ private final class NativeVaultViewModel: ObservableObject {
         self.authClient = runtimeConfig.map { SupabaseAuthClient(config: $0) }
         self.runtimeConfigIssue = runtimeConfigError
         bootstrap()
+    }
+
+    deinit {
+        networkMonitor.cancel()
     }
 
     var onboardingPages: [OnboardingPage] {
@@ -1569,6 +1782,28 @@ private final class NativeVaultViewModel: ObservableObject {
 
     var hasCloudTools: Bool {
         selectedTier == .cloud
+    }
+
+    var canUseManualCloudSync: Bool {
+        isPaidTier
+    }
+
+    var isSelectedCloudProviderAuthenticated: Bool {
+        guard cloudSyncProvider.requiresCloudAuth else { return true }
+#if canImport(GoogleSignIn)
+        if cloudSyncProvider == .googleDrive {
+            return GIDSignIn.sharedInstance.currentUser != nil
+        }
+#endif
+        return false
+    }
+
+    var syncNowDisabledReason: String? {
+        cloudSyncDisabledReason(automatic: false)
+    }
+
+    var isSyncNowEnabled: Bool {
+        syncNowDisabledReason == nil
     }
 
     var shouldShowCloudAccountSection: Bool {
@@ -1717,6 +1952,8 @@ private final class NativeVaultViewModel: ObservableObject {
             authStatusMessage = authEmail.isEmpty ? "Signed in with \(authProviderLabel)." : "Signed in with \(authProviderLabel) as \(authEmail)."
         }
         generatedPassword = generatePassword()
+        startNetworkMonitor()
+        logSyncNowAvailability(source: "bootstrap")
 
         refreshSupabaseSessionIfNeeded()
         refreshTierFromRevenueCat()
@@ -1777,6 +2014,7 @@ private final class NativeVaultViewModel: ObservableObject {
             passwordHintInput = ""
             showMasterPassword = false
             refreshEntries()
+            logSyncNowAvailability(source: "vault-unlock")
             startCloudSyncTimerIfNeeded()
             triggerAutoSync(reason: "unlock")
         } catch {
@@ -1794,6 +2032,7 @@ private final class NativeVaultViewModel: ObservableObject {
         showEditorSheet = false
         stopCloudSyncTimer()
         lastSuccessfulPassword = ""
+        logSyncNowAvailability(source: "vault-lock")
     }
 
     func setPasskeyUnlockEnabled(_ enabled: Bool) {
@@ -1989,6 +2228,7 @@ private final class NativeVaultViewModel: ObservableObject {
 #endif
 
         alertState = AlertState(message: "Account disconnected.")
+        logSyncNowAvailability(source: "auth-disconnected")
     }
 
     func generateDeveloperAPIKey() {
@@ -2200,6 +2440,7 @@ private final class NativeVaultViewModel: ObservableObject {
     func handleAppWillEnterForeground() {
         refreshSupabaseSessionIfNeeded()
         refreshTierFromRevenueCat()
+        logSyncNowAvailability(source: "foreground")
         if isUnlocked {
             triggerAutoSync(reason: "foreground")
         }
@@ -2208,22 +2449,25 @@ private final class NativeVaultViewModel: ObservableObject {
     func setCloudProvider(_ provider: CloudSyncProvider) {
         cloudSyncProvider = provider
         UserDefaults.standard.set(provider.rawValue, forKey: cloudProviderStorageKey)
+        logSyncNowAvailability(source: "provider-changed")
         if provider == .none {
             cloudSyncStatus = "Cloud sync disabled"
             stopCloudSyncTimer()
-        } else if !hasCloudTools {
-            cloudSyncStatus = isPaidTier
-                ? "Manual backup import/export available. CLOUD adds automatic sync."
-                : "Cloud backup requires a paid plan."
+        } else if !isPaidTier {
+            cloudSyncStatus = "Cloud backup requires a paid plan."
             stopCloudSyncTimer()
-        } else if isUnlocked {
+        } else if hasCloudTools, isUnlocked {
             startCloudSyncTimerIfNeeded()
             triggerAutoSync(reason: "provider-changed")
+        } else if isPaidTier {
+            cloudSyncStatus = selectedTier == .pro
+                ? "Provider selected. Use Sync Now for manual encrypted sync; CLOUD adds automatic sync."
+                : "Provider selected. Unlock your vault to sync."
         }
     }
 
     func syncCloudNow() {
-        triggerAutoSync(reason: "manual")
+        triggerCloudSync(reason: "manual", automatic: false)
     }
 
     func restorePurchases() {
@@ -2344,6 +2588,7 @@ private final class NativeVaultViewModel: ObservableObject {
         UserDefaults.standard.set(authEmail, forKey: authEmailStorageKey)
         passgenAuthLog.info("Auth state transitioned to authenticated provider=\(providerLabel, privacy: .public)")
         passgenAuthLog.info("Applied auth session provider=\(providerLabel, privacy: .public) userID=\(nextSession.userId, privacy: .private(mask: .hash)) emailPresent=\((self.authEmail.isEmpty == false), privacy: .public)")
+        logSyncNowAvailability(source: "auth-session")
     }
 
     func logVaultLockedStateRender(source: String) {
@@ -2541,15 +2786,83 @@ private final class NativeVaultViewModel: ObservableObject {
         return refreshed
     }
 
+    private func startNetworkMonitor() {
+        networkMonitor.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor in
+                guard let self else { return }
+                let available = path.status == .satisfied
+                guard self.isNetworkAvailable != available else { return }
+                self.isNetworkAvailable = available
+                self.cloudSyncStatus = available ? self.cloudSyncStatus : "Sync unavailable while offline."
+                self.logSyncNowAvailability(source: "network")
+            }
+        }
+        networkMonitor.start(queue: networkMonitorQueue)
+    }
+
+    private func cloudSyncDisabledReason(automatic: Bool) -> String? {
+        if automatic, !hasCloudTools {
+            return "Automatic cloud sync requires a CLOUD subscription."
+        }
+        if !automatic, !canUseManualCloudSync {
+            return "Sync Now requires a PRO or CLOUD subscription."
+        }
+        if cloudSyncProvider == .none {
+            return "Choose iCloud Drive or Google Drive before syncing."
+        }
+        if !hasVault {
+            return "Create a vault before syncing."
+        }
+        if !isUnlocked {
+            return "Unlock the vault before syncing."
+        }
+        if cloudSyncInProgress {
+            return "Cloud sync is already running."
+        }
+        if !isNetworkAvailable {
+            return "\(cloudSyncProvider.title) sync requires a network connection."
+        }
+        if cloudSyncProvider.requiresCloudAuth, !isSelectedCloudProviderAuthenticated {
+            return "\(cloudSyncProvider.title) sync requires cloud provider authentication."
+        }
+        return nil
+    }
+
+    func logSyncNowAvailability(source: String) {
+        let reason = syncNowDisabledReason ?? "enabled"
+        guard reason != lastLoggedSyncDisabledReason else { return }
+        lastLoggedSyncDisabledReason = reason
+        if syncNowDisabledReason == nil {
+            passgenAuthLog.info("Sync Now enabled source=\(source, privacy: .public)")
+        } else {
+            passgenAuthLog.info("Sync Now disabled source=\(source, privacy: .public) reason=\(reason, privacy: .public)")
+        }
+    }
+
     private func triggerAutoSync(reason: String) {
-        guard hasCloudTools else { return }
-        guard cloudSyncProvider != .none else { return }
-        guard hasVault else { return }
-        guard !cloudSyncInFlight else { return }
-        cloudSyncInFlight = true
+        triggerCloudSync(reason: reason, automatic: true)
+    }
+
+    private func triggerCloudSync(reason: String, automatic: Bool) {
+        if let disabledReason = cloudSyncDisabledReason(automatic: automatic) {
+            let source = automatic ? "auto-\(reason)" : reason
+            passgenAuthLog.info("Cloud sync skipped source=\(source, privacy: .public) reason=\(disabledReason, privacy: .public)")
+            if !automatic {
+                cloudSyncStatus = disabledReason
+                alertState = AlertState(message: disabledReason)
+            }
+            return
+        }
+
+        cloudSyncInProgress = true
+        cloudSyncStatus = "Syncing \(cloudSyncProvider.title)..."
+        logSyncNowAvailability(source: "sync-start-\(reason)")
 
         Task {
-            defer { cloudSyncInFlight = false }
+            defer {
+                cloudSyncInProgress = false
+                logSyncNowAvailability(source: "sync-finished-\(reason)")
+            }
             do {
                 switch cloudSyncProvider {
                 case .icloud:
@@ -2564,6 +2877,7 @@ private final class NativeVaultViewModel: ObservableObject {
                 cloudSyncStatus = "Synced (\(reason))"
             } catch {
                 cloudSyncStatus = "Sync failed: \(error.localizedDescription)"
+                passgenAuthLog.error("Cloud sync failed reason=\(reason, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
             }
         }
     }
@@ -3139,6 +3453,7 @@ private final class NativeVaultViewModel: ObservableObject {
         let entitlementSummary = activeEntitlementIDs.sorted().joined(separator: ",")
         let productSummary = activeProductIDs.sorted().joined(separator: ",")
         passgenAuthLog.info("RevenueCat tier applied tier=\(self.selectedTier.rawValue, privacy: .public) activeEntitlements=\(entitlementSummary, privacy: .private(mask: .hash)) activeProducts=\(productSummary, privacy: .private(mask: .hash))")
+        logSyncNowAvailability(source: "subscription-tier")
     }
 
     private func tierFromRevenueCatState(activeEntitlementIDs: [String], activeProductIDs: [String]) -> PremiumTier {
@@ -3177,7 +3492,9 @@ private final class NativeVaultViewModel: ObservableObject {
 
     func refreshEntries() {
         do {
-            entries = try store.listEntries()
+            let loadedEntries = try store.listEntries()
+            entries = loadedEntries
+            PassGenAutofillSharedStore.sync(entries: loadedEntries, encryptedVaultURL: store.encryptedVaultFileURL)
         } catch {
             alertState = AlertState(message: "Unable to load vault entries.")
         }
@@ -3363,6 +3680,7 @@ private final class NativeVaultViewModel: ObservableObject {
             NativeKeychain.deleteMasterPassword()
             NativeSessionKeychain.delete()
             NativeDeveloperAPIKeyKeychain.delete()
+            PassGenAutofillSharedStore.clear()
             stopCloudSyncTimer()
 
             hasVault = false
@@ -3624,6 +3942,7 @@ private struct NativePlansView: View {
 private struct NativeLegalFooterView: View {
     let onOpenURL: (String) -> Void
     var onDarkBackground: Bool = false
+    var showDeveloper: Bool = true
 
     private var bodyTextColor: Color {
         onDarkBackground ? Color.white.opacity(0.9) : .secondary
@@ -3647,15 +3966,17 @@ private struct NativeLegalFooterView: View {
                 onOpenURL(NativeVaultViewModel.companyURL)
             }
 
-            (
-                Text("Developed by ")
-                + Text("Jalal Nasser")
-                    .underline()
-            )
-            .font(.system(size: 12, weight: .medium))
-            .foregroundColor(bodyTextColor)
-            .onTapGesture {
-                onOpenURL(NativeVaultViewModel.developerURL)
+            if showDeveloper {
+                (
+                    Text("Developed by ")
+                    + Text("Jalal Nasser")
+                        .underline()
+                )
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(bodyTextColor)
+                .onTapGesture {
+                    onOpenURL(NativeVaultViewModel.developerURL)
+                }
             }
 
             HStack(spacing: 8) {
@@ -4289,10 +4610,18 @@ private struct NativeSettingsTabView: View {
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.secondary)
 
-                    Button("Sync Now") {
+                    Button {
                         viewModel.syncCloudNow()
+                    } label: {
+                        HStack(spacing: 8) {
+                            if viewModel.cloudSyncInProgress {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Text(viewModel.cloudSyncInProgress ? "Syncing..." : "Sync Now")
+                        }
                     }
-                    .disabled(!viewModel.hasCloudTools || viewModel.cloudSyncProvider == .none)
+                    .disabled(!viewModel.isSyncNowEnabled)
 
                     Button("Export Passwords Backup") {
                         if let document = viewModel.makeBackupDocument() {
@@ -4338,12 +4667,6 @@ private struct NativeSettingsTabView: View {
                     }
                 }
 
-                Section("Legal") {
-                    NativeLegalFooterView(onOpenURL: viewModel.openExternal)
-                        .padding(.vertical, 4)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                }
-
                 Section("Security") {
                     Toggle("Enable Biometric Unlock (Face ID)", isOn: passkeyBinding)
                         .disabled(!viewModel.hasVault)
@@ -4362,8 +4685,17 @@ private struct NativeSettingsTabView: View {
                         viewModel.showResetPrompt = true
                     }
                 }
+
+                Section("Legal") {
+                    NativeLegalFooterView(onOpenURL: viewModel.openExternal, showDeveloper: false)
+                        .padding(.vertical, 4)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
             }
             .navigationTitle("Settings")
+            .onAppear {
+                viewModel.logSyncNowAvailability(source: "settings")
+            }
             .fileImporter(
                 isPresented: importPickerPresented,
                 allowedContentTypes: importAllowedContentTypes
