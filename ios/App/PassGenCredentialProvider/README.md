@@ -6,4 +6,4 @@ Internal note:
 - The extension advertises password and one-time-code capabilities through AuthenticationServices.
 - TOTP visibility under iOS Settings > Passwords > Set Up Codes In depends on the iOS version and Apple-controlled settings UI. Do not bypass those restrictions.
 - Shared App Group storage contains encrypted vault data and non-secret metadata only. Credentials are revealed only after Face ID or master password authentication.
-- Appflow/App Store archives require separate provisioning profiles for `com.mdeploy.passgen` and `com.mdeploy.passgen.autofill` with App Groups, Associated Domains, and AutoFill Credential Provider enabled.
+- Appflow/App Store archives require separate provisioning profiles for `com.mdeploy.passgen` and `com.mdeploy.passgen.autofill` with App Groups and AutoFill Credential Provider enabled. Do not add Associated Domains unless both Appflow provisioning profiles are regenerated with that capability.

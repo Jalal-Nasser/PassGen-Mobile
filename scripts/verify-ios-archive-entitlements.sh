@@ -46,14 +46,10 @@ require_path "$extension_path"
 
 require_entitlement "$app_path" "com.apple.developer.authentication-services.autofill-credential-provider"
 require_entitlement "$app_path" "com.apple.security.application-groups"
-require_entitlement "$app_path" "com.apple.developer.associated-domains"
 require_value "$app_path" "group.com.mdeploy.passgen"
-require_value "$app_path" "webcredentials:mdeploy.dev"
 
 require_entitlement "$extension_path" "com.apple.developer.authentication-services.autofill-credential-provider"
 require_entitlement "$extension_path" "com.apple.security.application-groups"
-require_entitlement "$extension_path" "com.apple.developer.associated-domains"
 require_value "$extension_path" "group.com.mdeploy.passgen"
-require_value "$extension_path" "webcredentials:mdeploy.dev"
 
 echo "iOS archive entitlements verified."
