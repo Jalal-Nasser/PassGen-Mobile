@@ -725,8 +725,7 @@ private enum PremiumTier: String, CaseIterable, Hashable {
             return [
                 "Store up to 4 passwords",
                 "Local encrypted vault",
-                "Basic password generator",
-                "Import Apple Passwords CSV locally"
+                "Basic password generator"
             ]
         case .pro:
             return [
@@ -1800,6 +1799,10 @@ private final class NativeVaultViewModel: ObservableObject {
         isPaidTier || isAccountConnected
     }
 
+    var canUseAccountConnections: Bool {
+        isPaidTier
+    }
+
     var developerTargets: [String] {
         ["Vercel v0", "Replit", "VS Code", "Bolt"]
     }
@@ -1914,12 +1917,7 @@ private final class NativeVaultViewModel: ObservableObject {
         hasVault = store.hasVault()
         passwordHint = UserDefaults.standard.string(forKey: hintStorageKey) ?? ""
         showOnboarding = !UserDefaults.standard.bool(forKey: onboardingStorageKey)
-        if let storedTier = UserDefaults.standard.string(forKey: planStorageKey),
-           let parsedTier = PremiumTier(rawValue: storedTier) {
-            selectedTier = parsedTier
-        } else {
-            selectedTier = .free
-        }
+        selectedTier = .free
         passkeyUnlockEnabled = UserDefaults.standard.bool(forKey: passkeyEnabledStorageKey)
         authProviderLabel = UserDefaults.standard.string(forKey: authProviderStorageKey) ?? "Not Connected"
         authEmail = UserDefaults.standard.string(forKey: authEmailStorageKey) ?? ""
@@ -2072,6 +2070,12 @@ private final class NativeVaultViewModel: ObservableObject {
     func connectAppleAccount(credential: ASAuthorizationAppleIDCredential) {
         passgenAuthLog.info("Apple authorization completed credentialUser=\(credential.user, privacy: .private(mask: .hash)) emailPresent=\((credential.email?.isEmpty == false), privacy: .public) tokenPresent=\((credential.identityToken != nil), privacy: .public)")
 
+        guard isPaidTier else {
+            alertState = AlertState(message: "Account sign-in is available for PRO and CLOUD plans.")
+            showPlanSheet = true
+            return
+        }
+
         guard let authClient = authClient else {
             authStatusMessage = runtimeConfigIssue ?? "Mobile runtime config is missing."
             passgenAuthLog.error("Apple sign-in blocked: auth client unavailable")
@@ -2106,6 +2110,12 @@ private final class NativeVaultViewModel: ObservableObject {
     }
 
     func connectGoogleAccount(forceFresh: Bool = false, allowRetry: Bool = true) {
+        guard isPaidTier else {
+            alertState = AlertState(message: "Account sign-in is available for PRO and CLOUD plans.")
+            showPlanSheet = true
+            return
+        }
+
         guard let runtimeConfig, let authClient else {
             alertState = AlertState(message: runtimeConfigIssue ?? "Mobile runtime config is missing. Add Appflow Native Config values.")
             return
@@ -2419,6 +2429,12 @@ private final class NativeVaultViewModel: ObservableObject {
     }
 
     func importLocalPasswordCSVData(_ data: Data) {
+        guard isPaidTier else {
+            alertState = AlertState(message: "CSV import is available for PRO and CLOUD plans.")
+            showPlanSheet = true
+            return
+        }
+
         guard let csv = decodeCSVText(from: data), looksLikeCSV(csv) else {
             alertState = AlertState(message: "Choose the CSV file exported from Apple Passwords.")
             return
@@ -3436,8 +3452,14 @@ private final class NativeVaultViewModel: ObservableObject {
             }
         } else if selectedTier == .pro {
             cloudSyncStatus = "Manual backup import/export available. CLOUD adds automatic sync."
-        } else if cloudSyncProvider != .none {
-            cloudSyncStatus = "Cloud backup requires a paid plan."
+        } else {
+            apiKeySummaries = []
+            developerAPIKey = ""
+            NativeDeveloperAPIKeyKeychain.delete()
+            stopCloudSyncTimer()
+            if cloudSyncProvider != .none {
+                cloudSyncStatus = "Cloud backup requires a paid plan."
+            }
         }
 
         let entitlementSummary = activeEntitlementIDs.sorted().joined(separator: ",")
@@ -4429,7 +4451,7 @@ private struct NativeSettingsTabView: View {
 
                 if viewModel.shouldShowCloudAccountSection {
                 Section("Cloud Account") {
-                    Text("Connect an account only when you want encrypted iCloud / Google Drive sync.")
+                    Text("Account sign-in is available for paid plans and is used for encrypted iCloud / Google Drive sync and Developer API keys.")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.secondary)
 
@@ -4452,30 +4474,36 @@ private struct NativeSettingsTabView: View {
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(.secondary)
                     }
-                    HStack(spacing: 14) {
-                        NativeAppleIconButton(disabled: viewModel.authBusy) { result in
-                            switch result {
-                            case .success(let authorization):
-                                passgenAuthLog.info("Apple button completion received in settings")
-                                if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
-                                    viewModel.connectAppleAccount(credential: credential)
-                                } else {
-                                    passgenAuthLog.error("Apple button completion missing ASAuthorizationAppleIDCredential in settings")
-                                    viewModel.authStatusMessage = "Apple sign-in failed: missing Apple ID credential."
-                                    viewModel.alertState = AlertState(message: "Apple sign-in failed: missing Apple ID credential.")
+                    if viewModel.canUseAccountConnections {
+                        HStack(spacing: 14) {
+                            NativeAppleIconButton(disabled: viewModel.authBusy) { result in
+                                switch result {
+                                case .success(let authorization):
+                                    passgenAuthLog.info("Apple button completion received in settings")
+                                    if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
+                                        viewModel.connectAppleAccount(credential: credential)
+                                    } else {
+                                        passgenAuthLog.error("Apple button completion missing ASAuthorizationAppleIDCredential in settings")
+                                        viewModel.authStatusMessage = "Apple sign-in failed: missing Apple ID credential."
+                                        viewModel.alertState = AlertState(message: "Apple sign-in failed: missing Apple ID credential.")
+                                    }
+                                case .failure(let error):
+                                    passgenAuthLog.error("Apple button completion failed in settings: \(error.localizedDescription, privacy: .public)")
+                                    viewModel.authStatusMessage = "Apple sign-in failed: \(error.localizedDescription)"
+                                    viewModel.alertState = AlertState(message: "Apple sign-in failed: \(error.localizedDescription)")
                                 }
-                            case .failure(let error):
-                                passgenAuthLog.error("Apple button completion failed in settings: \(error.localizedDescription, privacy: .public)")
-                                viewModel.authStatusMessage = "Apple sign-in failed: \(error.localizedDescription)"
-                                viewModel.alertState = AlertState(message: "Apple sign-in failed: \(error.localizedDescription)")
                             }
-                        }
 
-                        NativeGoogleIconButton(action: {
-                            viewModel.connectGoogleAccount()
-                        }, disabled: viewModel.authBusy)
+                            NativeGoogleIconButton(action: {
+                                viewModel.connectGoogleAccount()
+                            }, disabled: viewModel.authBusy)
+                        }
+                        .frame(maxWidth: .infinity)
+                    } else {
+                        Button("Upgrade to Connect Account") {
+                            viewModel.showPlanSheet = true
+                        }
                     }
-                    .frame(maxWidth: .infinity)
 
                     if viewModel.authBusy {
                         HStack(spacing: 10) {
@@ -4566,14 +4594,20 @@ private struct NativeSettingsTabView: View {
                 }
 
                 Section("Local Import") {
-                    Text("Import a CSV file exported from Apple Passwords. Free users can import up to the 4-password local vault limit.")
+                    Text("Import a CSV file exported from Apple Passwords. CSV import is available for PRO and CLOUD plans.")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.secondary)
 
-                    Button("Import Apple Passwords CSV") {
-                        importKind = .localCSV
+                    if viewModel.isPaidTier {
+                        Button("Import Apple Passwords CSV") {
+                            importKind = .localCSV
+                        }
+                        .disabled(!viewModel.isUnlocked)
+                    } else {
+                        Button("Upgrade to Import") {
+                            viewModel.showPlanSheet = true
+                        }
                     }
-                    .disabled(!viewModel.isUnlocked)
                 }
 
                 Section("Cloud Backup") {
