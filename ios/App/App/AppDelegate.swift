@@ -309,6 +309,10 @@ private struct APIKeyRevocationResponse: Decodable {
     let revoked_id: String?
 }
 
+private struct AccountDeletionResponse: Decodable {
+    let ok: Bool
+}
+
 private struct MobileAPIKeySummaryDTO: Decodable {
     let id: String
     let key_prefix: String
@@ -503,6 +507,17 @@ private final class SupabaseAuthClient {
         _ = try JSONDecoder().decode(APIKeyRevocationResponse.self, from: data)
     }
 
+    func deleteAccount(accessToken: String) async throws {
+        let endpoint = config.supabaseURL.appendingPathComponent("functions/v1/delete-account")
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        let data = try await sendAuthorizedRequest(request)
+        _ = try JSONDecoder().decode(AccountDeletionResponse.self, from: data)
+    }
+
     private func sendTokenRequest(_ request: URLRequest) async throws -> SupabaseSession {
         let data: Data
         let response: URLResponse
@@ -555,7 +570,8 @@ private final class SupabaseAuthClient {
             } ?? "Supabase request failed."
             let normalizedMessage = message.lowercased()
             if http.statusCode == 404 && normalizedMessage.contains("function") && normalizedMessage.contains("not found") {
-                throw SupabaseAuthError.requestFailed("Developer API backend is not deployed. Deploy the mobile-api-keys-create/list/revoke/verify Supabase Edge Functions to this app's Supabase project.")
+                let functionName = request.url?.lastPathComponent ?? "requested"
+                throw SupabaseAuthError.requestFailed("Supabase Edge Function '\(functionName)' is not deployed for this app's Supabase project.")
             }
             throw SupabaseAuthError.requestFailed(message)
         }
@@ -1667,6 +1683,7 @@ private final class NativeVaultViewModel: ObservableObject {
     @Published var websiteQuery = ""
     @Published var draft = VaultEntryDraft.empty
     @Published var showResetPrompt = false
+    @Published var showDeleteAccountPrompt = false
     @Published var showPlanSheet = false
     @Published var selectedTier: PremiumTier = .free
     @Published var passkeyUnlockEnabled = false
@@ -1674,6 +1691,7 @@ private final class NativeVaultViewModel: ObservableObject {
     @Published var authEmail = ""
     @Published var authBusy = false
     @Published var authStatusMessage = ""
+    @Published var accountDeletionInProgress = false
     @Published var runtimeConfigIssue: String?
     @Published var cloudSyncProvider: CloudSyncProvider = .none
     @Published var cloudSyncStatus = "Cloud sync disabled"
@@ -2229,6 +2247,26 @@ private final class NativeVaultViewModel: ObservableObject {
 
         alertState = AlertState(message: "Account disconnected.")
         logSyncNowAvailability(source: "auth-disconnected")
+    }
+
+    func deleteAccount() {
+        guard let authClient, let activeSession = session else {
+            alertState = AlertState(message: "Sign in before deleting your account.")
+            return
+        }
+
+        accountDeletionInProgress = true
+        Task {
+            defer { accountDeletionInProgress = false }
+            do {
+                let session = try await refreshedSessionIfNeeded(activeSession)
+                try await authClient.deleteAccount(accessToken: session.accessToken)
+                resetAppData()
+                alertState = AlertState(message: "Your PassGen account and local app data were deleted.")
+            } catch {
+                alertState = AlertState(message: "Unable to delete account: \(error.localizedDescription)")
+            }
+        }
     }
 
     func generateDeveloperAPIKey() {
@@ -3694,6 +3732,9 @@ private final class NativeVaultViewModel: ObservableObject {
             NativeDeveloperAPIKeyKeychain.delete()
             PassGenAutofillSharedStore.clear()
             stopCloudSyncTimer()
+#if canImport(GoogleSignIn)
+            GIDSignIn.sharedInstance.signOut()
+#endif
 
             hasVault = false
             isUnlocked = false
@@ -3707,6 +3748,7 @@ private final class NativeVaultViewModel: ObservableObject {
             draft = .empty
             showEditorSheet = false
             showWebsitePicker = false
+            showDeleteAccountPrompt = false
             websiteQuery = ""
             showPlanSheet = false
             planStatusMessage = ""
@@ -3769,6 +3811,19 @@ private struct NativeVaultRootView: View {
                 viewModel.resetAppData()
             }
             Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog(
+            "Delete your PassGen account?",
+            isPresented: $viewModel.showDeleteAccountPrompt,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Account", role: .destructive) {
+                viewModel.deleteAccount()
+            }
+            .disabled(viewModel.accountDeletionInProgress)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently deletes your signed-in account and clears local app data on this device.")
         }
         .sheet(isPresented: $viewModel.showPlanSheet) {
             NativePlansView(viewModel: viewModel)
@@ -4524,6 +4579,11 @@ private struct NativeSettingsTabView: View {
                         Button("Disconnect Account", role: .destructive) {
                             viewModel.disconnectAccount()
                         }
+
+                        Button("Delete Account", role: .destructive) {
+                            viewModel.showDeleteAccountPrompt = true
+                        }
+                        .disabled(viewModel.accountDeletionInProgress)
                     }
                 }
                 }

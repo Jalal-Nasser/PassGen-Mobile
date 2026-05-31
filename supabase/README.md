@@ -28,6 +28,7 @@ supabase functions deploy mobile-api-keys-create
 supabase functions deploy mobile-api-keys-list
 supabase functions deploy mobile-api-keys-revoke
 supabase functions deploy mobile-api-keys-verify
+supabase functions deploy delete-account
 supabase functions deploy revenuecat-webhook
 ```
 
@@ -59,6 +60,20 @@ supabase secrets set DISCORD_WEBHOOK_URL="your-webhook-url"
   - `Authorization: Bearer pg_live_...`
   - `x-passgen-api-key: pg_live_...`
 - API keys require an active `pro` or `cloud` plan in `mobile_subscription_state`.
+
+## Account Deletion
+
+`POST /functions/v1/delete-account`
+
+Call this endpoint with the signed-in user's Supabase access token:
+
+```bash
+curl -X POST https://<project-ref>.supabase.co/functions/v1/delete-account \
+  -H "Authorization: Bearer <supabase-access-token>" \
+  -H "Content-Type: application/json"
+```
+
+The function deletes the Supabase Auth user with the service role key. `mobile_api_keys` and `mobile_subscription_state` are linked to `auth.users(id)` with `on delete cascade`, so account-owned mobile backend rows are removed with the user.
 
 ### Verify API key endpoint
 
