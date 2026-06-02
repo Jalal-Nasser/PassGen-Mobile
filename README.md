@@ -15,6 +15,8 @@
 
 For the mobile version specifically, the application operates entirely offline-first, using local device storage for the encrypted vault. **For cloud synchronization and database backups across devices, it relies directly on Google Drive (for Android) and iCloud (for iOS)**, instead of an external backend database.
 
+<a href="https://apps.apple.com/sa/app/passgen-secret-vault/id6759681459"><img width="150" height="50" alt="image" src="https://github.com/user-attachments/assets/d130132a-7ad6-455d-8e09-2b0d245b03b6" /></a>
+
 ## Platforms & Technology Stack
 The project heavily utilizes a modern cross-platform mobile web stack:
 - **Ionic Appflow**: Used for Continuous Integration and Continuous Deployment (CI/CD) specifically for automating iOS and Android native builds in the cloud.
