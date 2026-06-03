@@ -8,6 +8,7 @@ import LocalAuthentication
 import AuthenticationServices
 import AVFoundation
 import Network
+import UserNotifications
 import os
 import StoreKit
 
@@ -1687,6 +1688,8 @@ private final class NativeVaultViewModel: ObservableObject {
     @Published var showPlanSheet = false
     @Published var selectedTier: PremiumTier = .free
     @Published var passkeyUnlockEnabled = false
+    @Published var notificationsEnabled = false
+    @Published var notificationStatusMessage = ""
     @Published var authProviderLabel = "Not Connected"
     @Published var authEmail = ""
     @Published var authBusy = false
@@ -1716,6 +1719,7 @@ private final class NativeVaultViewModel: ObservableObject {
     private let onboardingStorageKey = "passgen-onboarding-complete-native"
     private let planStorageKey = "passgen-plan-tier-native"
     private let passkeyEnabledStorageKey = "passgen-passkey-enabled-native"
+    private let notificationsEnabledStorageKey = "passgen-notifications-enabled-native"
     private let authProviderStorageKey = "passgen-auth-provider-native"
     private let authEmailStorageKey = "passgen-auth-email-native"
     private let cloudProviderStorageKey = "passgen-cloud-provider-native"
@@ -1937,6 +1941,8 @@ private final class NativeVaultViewModel: ObservableObject {
         showOnboarding = !UserDefaults.standard.bool(forKey: onboardingStorageKey)
         selectedTier = .free
         passkeyUnlockEnabled = UserDefaults.standard.bool(forKey: passkeyEnabledStorageKey)
+        notificationsEnabled = UserDefaults.standard.bool(forKey: notificationsEnabledStorageKey)
+        refreshNotificationAuthorizationStatus()
         authProviderLabel = UserDefaults.standard.string(forKey: authProviderStorageKey) ?? "Not Connected"
         authEmail = UserDefaults.standard.string(forKey: authEmailStorageKey) ?? ""
         developerAPIKey = NativeDeveloperAPIKeyKeychain.read() ?? ""
@@ -2055,6 +2061,57 @@ private final class NativeVaultViewModel: ObservableObject {
         } else {
             NativeKeychain.deleteMasterPassword()
             alertState = AlertState(message: "Biometric unlock disabled.")
+        }
+    }
+
+    func setNotificationsEnabled(_ enabled: Bool) {
+        if enabled {
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { [weak self] granted, error in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+
+                    if granted {
+                        self.notificationsEnabled = true
+                        UserDefaults.standard.set(true, forKey: self.notificationsEnabledStorageKey)
+                        self.notificationStatusMessage = "Notifications enabled."
+                    } else {
+                        self.notificationsEnabled = false
+                        UserDefaults.standard.set(false, forKey: self.notificationsEnabledStorageKey)
+                        self.notificationStatusMessage = "Notifications are disabled in iOS Settings."
+                        let fallback = "Notifications are disabled. Enable them in iOS Settings to receive PassGen alerts."
+                        self.alertState = AlertState(message: error?.localizedDescription ?? fallback)
+                    }
+                }
+            }
+        } else {
+            notificationsEnabled = false
+            UserDefaults.standard.set(false, forKey: notificationsEnabledStorageKey)
+            UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+            UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+            notificationStatusMessage = "Notifications disabled."
+        }
+    }
+
+    func refreshNotificationAuthorizationStatus() {
+        UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+
+                switch settings.authorizationStatus {
+                case .authorized, .provisional, .ephemeral:
+                    self.notificationStatusMessage = self.notificationsEnabled
+                        ? "Notifications enabled."
+                        : "Notifications permission granted."
+                case .denied:
+                    self.notificationsEnabled = false
+                    UserDefaults.standard.set(false, forKey: self.notificationsEnabledStorageKey)
+                    self.notificationStatusMessage = "Notifications are disabled in iOS Settings."
+                case .notDetermined:
+                    self.notificationStatusMessage = "Notifications are not enabled."
+                @unknown default:
+                    self.notificationStatusMessage = "Notification status unavailable."
+                }
+            }
         }
     }
 
@@ -2484,6 +2541,7 @@ private final class NativeVaultViewModel: ObservableObject {
     func handleAppWillEnterForeground() {
         refreshSupabaseSessionIfNeeded()
         refreshTierFromRevenueCat()
+        refreshNotificationAuthorizationStatus()
         logSyncNowAvailability(source: "foreground")
         if isUnlocked {
             triggerAutoSync(reason: "foreground")
@@ -3723,6 +3781,7 @@ private final class NativeVaultViewModel: ObservableObject {
             UserDefaults.standard.removeObject(forKey: onboardingStorageKey)
             UserDefaults.standard.removeObject(forKey: planStorageKey)
             UserDefaults.standard.removeObject(forKey: passkeyEnabledStorageKey)
+            UserDefaults.standard.removeObject(forKey: notificationsEnabledStorageKey)
             UserDefaults.standard.removeObject(forKey: authProviderStorageKey)
             UserDefaults.standard.removeObject(forKey: authEmailStorageKey)
             UserDefaults.standard.removeObject(forKey: cloudProviderStorageKey)
@@ -3731,6 +3790,8 @@ private final class NativeVaultViewModel: ObservableObject {
             NativeSessionKeychain.delete()
             NativeDeveloperAPIKeyKeychain.delete()
             PassGenAutofillSharedStore.clear()
+            UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+            UNUserNotificationCenter.current().removeAllDeliveredNotifications()
             stopCloudSyncTimer()
 #if canImport(GoogleSignIn)
             GIDSignIn.sharedInstance.signOut()
@@ -3756,6 +3817,8 @@ private final class NativeVaultViewModel: ObservableObject {
             activeTab = .vault
             selectedTier = .free
             passkeyUnlockEnabled = false
+            notificationsEnabled = false
+            notificationStatusMessage = "Notifications are not enabled."
             authProviderLabel = "Not Connected"
             authEmail = ""
             authBusy = false
@@ -4450,6 +4513,13 @@ private struct NativeSettingsTabView: View {
         )
     }
 
+    private var notificationsBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.notificationsEnabled },
+            set: { viewModel.setNotificationsEnabled($0) }
+        )
+    }
+
     private func makeExportFilename() -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
@@ -4752,6 +4822,14 @@ private struct NativeSettingsTabView: View {
                 }
 
                 Section("Security") {
+                    Toggle("Enable Notifications", isOn: notificationsBinding)
+
+                    if !viewModel.notificationStatusMessage.isEmpty {
+                        Text(viewModel.notificationStatusMessage)
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundColor(.secondary)
+                    }
+
                     Toggle("Enable Biometric Unlock (Face ID)", isOn: passkeyBinding)
                         .disabled(!viewModel.hasVault)
 
